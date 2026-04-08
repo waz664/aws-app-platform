@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useState } from 'react';
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
+import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import './App.css';
 import { beginSignIn, beginSignOut, restoreAuthSession } from './lib/auth';
 import { loadCondoOpsData } from './lib/data-client';
@@ -18,6 +18,8 @@ const percent = new Intl.NumberFormat('en-US', {
 });
 
 function App() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [config, setConfig] = useState<RuntimeConfig | null>(null);
   const [session, setSession] = useState<AuthSession | null>(null);
   const [data, setData] = useState<CondoOpsData | null>(null);
@@ -49,6 +51,26 @@ function App() {
       setIsRefreshing,
     });
   }, [config, session]);
+
+  useEffect(() => {
+    if (!config || !session || location.pathname !== '/auth/callback') {
+      return;
+    }
+
+    if (config.mode !== 'aws') {
+      navigate('/dashboard', { replace: true });
+      return;
+    }
+
+    if (session.status === 'authenticated') {
+      navigate('/dashboard', { replace: true });
+      return;
+    }
+
+    if (session.status === 'guest') {
+      navigate('/', { replace: true });
+    }
+  }, [config, location.pathname, navigate, session]);
 
   async function handleSignIn(): Promise<void> {
     if (!config) {
