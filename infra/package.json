@@ -1,0 +1,27 @@
+{
+  "name": "aws-app-platform-infra",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "cdk": "cdk",
+    "synth": "cdk synth --context env=dev",
+    "bootstrap:dev": "cdk bootstrap --context env=dev",
+    "bootstrap:stage": "cdk bootstrap --context env=stage",
+    "bootstrap:prod": "cdk bootstrap --context env=prod",
+    "deploy:dev": "cdk deploy --all --context env=dev --require-approval never",
+    "deploy:stage": "cdk deploy --all --context env=stage --require-approval never",
+    "deploy:prod": "cdk deploy --all --context env=prod --require-approval never"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.248.0",
+    "constructs": "^10.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.2",
+    "aws-cdk": "^2.1039.0",
+    "esbuild": "^0.25.12",
+    "typescript": "~6.0.2"
+  }
+}

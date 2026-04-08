@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Condo Ops</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(160deg, #d9efe7 0%, #f8f4e8 52%, #f4c9a8 100%);
+        color: #15353a;
+        font-family: Arial, sans-serif;
+      }
+
+      main {
+        width: min(42rem, calc(100% - 2rem));
+        padding: 2rem;
+        border-radius: 1.5rem;
+        background: rgba(255, 255, 255, 0.84);
+        box-shadow: 0 20px 60px rgba(24, 52, 57, 0.15);
+      }
+
+      h1 {
+        margin-top: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Condo Ops is deploying</h1>
+      <p>The CloudFront distribution is ready, but the built web app assets have not been uploaded yet.</p>
+      <p>Run the root deploy script after the React app has been built to publish the real UI.</p>
+    </main>
+  </body>
+</html>

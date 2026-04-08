@@ -1,0 +1,30 @@
+{
+  "name": "aws-app-platform",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Reusable AWS platform for low-cost web applications.",
+  "workspaces": [
+    "apps/*",
+    "services/*",
+    "infra"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace condo-ops-web",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "echo \"Automated tests are not wired in yet.\"",
+    "build": "npm run build:web && npm run build:api && npm run build:infra",
+    "build:web": "npm run build --workspace condo-ops-web",
+    "build:api": "npm run build --workspace condo-ops-api",
+    "build:infra": "npm run build --workspace aws-app-platform-infra",
+    "infra:synth": "npm run build:web && npm run build:infra && npm run synth --workspace aws-app-platform-infra",
+    "bootstrap:dev": "npm run bootstrap:dev --workspace aws-app-platform-infra",
+    "bootstrap:stage": "npm run bootstrap:stage --workspace aws-app-platform-infra",
+    "bootstrap:prod": "npm run bootstrap:prod --workspace aws-app-platform-infra",
+    "deploy:dev": "npm run build:web && npm run build:infra && npm run deploy:dev --workspace aws-app-platform-infra",
+    "deploy:stage": "npm run build:web && npm run build:infra && npm run deploy:stage --workspace aws-app-platform-infra",
+    "deploy:prod": "npm run build:web && npm run build:infra && npm run deploy:prod --workspace aws-app-platform-infra"
+  },
+  "engines": {
+    "node": ">=22 <23"
+  }
+}

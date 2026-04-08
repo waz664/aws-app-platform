@@ -1,0 +1,4 @@
+{
+  "app": "node --enable-source-maps ./dist/bin/aws-app-platform.js"
+}
+
