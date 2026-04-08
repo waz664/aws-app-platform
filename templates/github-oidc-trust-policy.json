@@ -16,6 +16,8 @@
             "repo:waz664/<GITHUB_REPO>:ref:refs/heads/develop",
             "repo:waz664/<GITHUB_REPO>:ref:refs/heads/main",
             "repo:waz664/<GITHUB_REPO>:ref:refs/tags/*",
+            "repo:waz664/<GITHUB_REPO>:environment:dev",
+            "repo:waz664/<GITHUB_REPO>:environment:stage",
             "repo:waz664/<GITHUB_REPO>:environment:prod"
           ]
         }
