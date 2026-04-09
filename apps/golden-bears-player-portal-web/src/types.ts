@@ -98,6 +98,103 @@ export type AdminUserUpdateInput = {
   accountStatus: AccountStatus;
 };
 
+export type EvaluationCriterion = {
+  id: string;
+  title: string;
+  weight: number;
+  score1Description: string;
+  score3Description: string;
+  score5Description: string;
+};
+
+export type EvaluationTemplate = {
+  id: string;
+  name: string;
+  criteria: EvaluationCriterion[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EvaluationTemplateCreateInput = {
+  name?: string;
+  sourceTemplateId?: string;
+  useDefaultCriteria?: boolean;
+};
+
+export type EvaluationTemplateUpdateInput = {
+  name: string;
+  criteria: EvaluationCriterion[];
+};
+
+export type TryoutGender = 'Male' | 'Female' | 'Non-binary' | 'Prefer not to say';
+
+export type TryoutGroup = {
+  id: string;
+  name: string;
+  allowedBirthYears: string[];
+  allowedGenders: TryoutGender[];
+};
+
+export type TryoutTeam = {
+  id: string;
+  groupId: string;
+  name: string;
+};
+
+export type TryoutSession = {
+  id: string;
+  name: string;
+  teamIds: string[];
+};
+
+export type TryoutPlayerAssignmentMode = 'default' | 'manual' | 'unassigned';
+
+export type TryoutPlayerOverride = {
+  playerId: string;
+  assignmentMode: TryoutPlayerAssignmentMode;
+  groupId: string | null;
+  teamId: string | null;
+  jerseyNumber: string;
+};
+
+export type TryoutPlayerSummary = {
+  playerId: string;
+  firstName: string;
+  lastName: string;
+  birthYear: string;
+  gender: string;
+  displayName: string;
+  eligibleGroupIds: string[];
+  defaultGroupId: string | null;
+  effectiveGroupId: string | null;
+  teamId: string | null;
+  jerseyNumber: string;
+};
+
+export type TryoutSeason = {
+  id: string;
+  name: string;
+  groups: TryoutGroup[];
+  teams: TryoutTeam[];
+  sessions: TryoutSession[];
+  playerOverrides: TryoutPlayerOverride[];
+  players: TryoutPlayerSummary[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TryoutSeasonCreateInput = {
+  name: string;
+};
+
+export type TryoutSeasonUpdateInput = {
+  name: string;
+  groups: TryoutGroup[];
+  teams: TryoutTeam[];
+  sessions: TryoutSession[];
+  playerOverrides: TryoutPlayerOverride[];
+};
+
 export type PlayerTeamHistoryEntry = {
   id: string;
   seasonLabel: string;
