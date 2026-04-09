@@ -4,6 +4,9 @@ import type {
   AdminUserDirectoryEntry,
   AdminUserUpdateInput,
   AdminUsersResponse,
+  EvaluationSessionContext,
+  EvaluationNote,
+  EvaluationScoreValue,
   EvaluationTemplate,
   EvaluationTemplateCreateInput,
   EvaluationTemplateUpdateInput,
@@ -548,7 +551,11 @@ export async function updateTryoutSeason(
       name: payload.name.trim(),
       groups: payload.groups.map((group) => ({ ...group, allowedBirthYears: [...group.allowedBirthYears], allowedGenders: [...group.allowedGenders] })),
       teams: payload.teams.map((team) => ({ ...team })),
-      sessions: payload.sessions.map((session) => ({ ...session, teamIds: [...session.teamIds] })),
+      sessions: payload.sessions.map((session) => ({
+        ...session,
+        teamIds: [...session.teamIds],
+        evaluationTemplateId: session.evaluationTemplateId ?? null,
+      })),
       playerOverrides: payload.playerOverrides.map((override) => ({ ...override })),
       players: existingSeason ? cloneTryoutSeason(existingSeason).players : [],
       createdAt: existingSeason?.createdAt ?? new Date().toISOString(),
@@ -586,6 +593,39 @@ export async function deleteTryoutSeason(
   );
 }
 
+export async function downloadTryoutSeasonReport(
+  config: RuntimeConfig,
+  idToken: string | null,
+  seasonId: string,
+  seasonName: string,
+): Promise<{ fileName: string }> {
+  if (!isAwsConfig(config) || !idToken) {
+    throw new Error('Tryout report downloads in demo mode are not implemented.');
+  }
+
+  const fileName = `${slugifyFileName(seasonName) || 'tryout-season'}-report.pdf`;
+  const blob = await requestBlob(
+    `${config.apiBaseUrl}/tryout-seasons/${seasonId}/report`,
+    {
+      idToken,
+    },
+  );
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = fileName;
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  window.setTimeout(() => {
+    URL.revokeObjectURL(objectUrl);
+  }, 1_000);
+
+  return { fileName };
+}
+
 function cloneTryoutSeason(season: TryoutSeason): TryoutSeason {
   return {
     ...season,
@@ -598,6 +638,7 @@ function cloneTryoutSeason(season: TryoutSeason): TryoutSeason {
     sessions: season.sessions.map((session) => ({
       ...session,
       teamIds: [...session.teamIds],
+      evaluationTemplateId: session.evaluationTemplateId ?? null,
     })),
     playerOverrides: season.playerOverrides.map((override) => ({ ...override })),
     players: season.players.map((player) => ({
@@ -605,6 +646,49 @@ function cloneTryoutSeason(season: TryoutSeason): TryoutSeason {
       eligibleGroupIds: [...player.eligibleGroupIds],
     })),
   };
+}
+
+export async function loadEvaluationSessionContext(
+  config: RuntimeConfig,
+  idToken: string | null,
+  seasonId: string,
+  sessionId: string,
+): Promise<EvaluationSessionContext> {
+  if (!isAwsConfig(config) || !idToken) {
+    throw new Error('Evaluation mode in demo mode is not implemented.');
+  }
+
+  return requestJson<EvaluationSessionContext>(
+    `${config.apiBaseUrl}/tryout-seasons/${seasonId}/sessions/${sessionId}/evaluation`,
+    {
+      idToken,
+    },
+  );
+}
+
+export async function updatePlayerEvaluationRecord(
+  config: RuntimeConfig,
+  idToken: string | null,
+  seasonId: string,
+  sessionId: string,
+  playerId: string,
+  payload: {
+    scores: Record<string, EvaluationScoreValue | null>;
+    notes: EvaluationNote[];
+  },
+): Promise<{ record: EvaluationSessionContext['records'][number] | null }> {
+  if (!isAwsConfig(config) || !idToken) {
+    throw new Error('Evaluation mode in demo mode is not implemented.');
+  }
+
+  return requestJson<{ record: EvaluationSessionContext['records'][number] | null }>(
+    `${config.apiBaseUrl}/tryout-seasons/${seasonId}/sessions/${sessionId}/players/${playerId}/evaluation`,
+    {
+      idToken,
+      method: 'PUT',
+      body: payload,
+    },
+  );
 }
 
 async function requestJson<T>(
@@ -630,4 +714,36 @@ async function requestJson<T>(
   }
 
   return (await response.json()) as T;
+}
+
+async function requestBlob(
+  url: string,
+  options: {
+    idToken: string;
+    method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+    body?: unknown;
+  },
+): Promise<Blob> {
+  const response = await fetch(url, {
+    method: options.method ?? 'GET',
+    headers: {
+      authorization: `Bearer ${options.idToken}`,
+      ...(options.body ? { 'content-type': 'application/json' } : {}),
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Request failed for ${url}: ${response.status} ${body}`);
+  }
+
+  return response.blob();
+}
+
+function slugifyFileName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }

@@ -147,18 +147,37 @@ export class GoldenBearsPlayerPortalStack extends Stack {
       retention: logs.RetentionDays.ONE_WEEK,
       removalPolicy,
     });
+    const pdfkitDataDirectory = path.resolve(
+      process.cwd(),
+      '../node_modules/pdfkit/js/data',
+    );
 
     const apiHandler = new lambdaNodejs.NodejsFunction(this, 'PlayerPortalApiHandler', {
       runtime: lambda.Runtime.NODEJS_22_X,
       entry: path.resolve(process.cwd(), '../services/golden-bears-player-portal-api/src/index.ts'),
       handler: 'handler',
-      memorySize: 512,
-      timeout: Duration.seconds(10),
+      memorySize: 1024,
+      timeout: Duration.seconds(30),
       logGroup: apiLogGroup,
       bundling: {
         target: 'node22',
         minify: true,
         sourceMap: true,
+        commandHooks: {
+          beforeBundling() {
+            return [];
+          },
+          beforeInstall() {
+            return [];
+          },
+          afterBundling(_inputDir: string, outputDir: string) {
+            const source = pdfkitDataDirectory.replace(/\\/g, '\\\\');
+            const target = path.join(outputDir, 'data').replace(/\\/g, '\\\\');
+            return [
+              `node -e "require('fs').cpSync('${source}', '${target}', { recursive: true })"`,
+            ];
+          },
+        },
       },
       environment: {
         APP_KEY: 'golden-bears-player-portal',
@@ -322,6 +341,30 @@ export class GoldenBearsPlayerPortalStack extends Stack {
     new apigwv2.CfnRoute(this, 'TryoutSeasonsDeleteRoute', {
       apiId: httpApi.apiId,
       routeKey: 'DELETE /tryout-seasons/{seasonId}',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
+    new apigwv2.CfnRoute(this, 'TryoutSeasonsReportRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'GET /tryout-seasons/{seasonId}/report',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
+    new apigwv2.CfnRoute(this, 'EvaluationSessionContextRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'GET /tryout-seasons/{seasonId}/sessions/{sessionId}/evaluation',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
+    new apigwv2.CfnRoute(this, 'EvaluationPlayerRecordRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'PUT /tryout-seasons/{seasonId}/sessions/{sessionId}/players/{playerId}/evaluation',
       target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
       authorizationType: 'JWT',
       authorizerId: jwtAuthorizer.ref,

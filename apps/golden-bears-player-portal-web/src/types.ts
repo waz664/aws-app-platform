@@ -145,6 +145,7 @@ export type TryoutSession = {
   id: string;
   name: string;
   teamIds: string[];
+  evaluationTemplateId: string | null;
 };
 
 export type TryoutPlayerAssignmentMode = 'default' | 'manual' | 'unassigned';
@@ -181,6 +182,69 @@ export type TryoutSeason = {
   players: TryoutPlayerSummary[];
   createdAt: string;
   updatedAt: string;
+};
+
+export type EvaluationScoreValue = 1 | 2 | 3 | 4 | 5;
+
+export type EvaluationNote = {
+  id: string;
+  text: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PlayerEvaluationRecord = {
+  playerId: string;
+  seasonId: string;
+  sessionId: string;
+  evaluatorUserId: string;
+  evaluatorName: string;
+  templateId: string;
+  scores: Record<string, EvaluationScoreValue | null>;
+  notes: EvaluationNote[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EvaluationSessionPlayer = {
+  playerId: string;
+  firstName: string;
+  lastName: string;
+  displayName: string;
+  jerseyNumber: string;
+  groupId: string;
+  groupName: string;
+  teamId: string;
+  teamName: string;
+  birthYear: string;
+  lastTeamName: string;
+  position: string;
+  heightDisplay: string;
+  weightDisplay: string;
+  yearsPlaying: number | null;
+  completedBy: CompletedByOption;
+  intake: IntakeAnswers;
+};
+
+export type EvaluationSessionTeam = {
+  id: string;
+  name: string;
+  groupId: string;
+  groupName: string;
+  players: EvaluationSessionPlayer[];
+};
+
+export type EvaluationSessionContext = {
+  seasonId: string;
+  seasonName: string;
+  session: TryoutSession;
+  template: EvaluationTemplate;
+  teams: EvaluationSessionTeam[];
+  records: PlayerEvaluationRecord[];
+  evaluator: {
+    userId: string;
+    displayName: string;
+  };
 };
 
 export type TryoutSeasonCreateInput = {

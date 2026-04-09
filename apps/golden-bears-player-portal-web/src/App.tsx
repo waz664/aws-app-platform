@@ -11,7 +11,9 @@ import {
   deleteEvaluationTemplate,
   deleteTryoutSeason,
   declineInvite,
+  downloadTryoutSeasonReport,
   loadAdminUsers,
+  loadEvaluationSessionContext,
   loadBootstrapData,
   loadEvaluationTemplates,
   loadTryoutSeasons,
@@ -19,6 +21,7 @@ import {
   saveUserRole,
   updateAdminUser,
   updateCurrentUserProfile,
+  updatePlayerEvaluationRecord,
   updateEvaluationTemplate,
   updatePlayer,
   updateOrganizationSettings,
@@ -35,6 +38,9 @@ import type {
   BootstrapData,
   CompletedByOption,
   EvaluationCriterion,
+  EvaluationNote,
+  EvaluationScoreValue,
+  EvaluationSessionContext,
   EvaluationTemplate,
   IntakeAnswers,
   IntakeStatus,
@@ -215,6 +221,7 @@ type TryoutSetupCardProps = {
   draft: TryoutSeason | null;
   loaded: boolean;
   loading: boolean;
+  evaluationTemplates: EvaluationTemplate[];
   newSeasonName: string;
   busyAction: string | null;
   draggingPlayerId: string | null;
@@ -222,6 +229,7 @@ type TryoutSetupCardProps = {
   onCreateSeason: () => void;
   onSelectSeason: (seasonId: string) => void;
   onDeleteSeason: () => void;
+  onDownloadReport: () => void;
   onSeasonNameChange: (value: string) => void;
   onSaveSeason: () => void;
   onAddGroup: () => void;
@@ -241,9 +249,31 @@ type TryoutSetupCardProps = {
   onUpdatePlayerJersey: (playerId: string, value: string) => void;
   onAddSession: () => void;
   onUpdateSessionName: (sessionId: string, value: string) => void;
+  onUpdateSessionTemplate: (sessionId: string, templateId: string | null) => void;
   onToggleSessionTeam: (sessionId: string, teamId: string, checked: boolean) => void;
   onRemoveSession: (sessionId: string) => void;
+  onStartEvaluation: (sessionId: string) => void;
   onStartPlayerDrag: (playerId: string | null) => void;
+};
+
+type EvaluationSaveIndicator = {
+  state: 'idle' | 'saving' | 'saved' | 'error';
+  message: string;
+};
+
+type EvaluationWorkspaceProps = {
+  context: EvaluationSessionContext | null;
+  loading: boolean;
+  feedback: FeedbackState | null;
+  saveIndicators: Record<string, EvaluationSaveIndicator>;
+  onExit: () => void;
+  onSavePlayerRecord: (
+    playerId: string,
+    payload: {
+      scores: Record<string, EvaluationScoreValue | null>;
+      notes: EvaluationNote[];
+    },
+  ) => void;
 };
 
 type UserProfileFieldKey = Exclude<keyof EditableUserProfileState, 'smsOptIn'>;
@@ -610,6 +640,10 @@ const DESIGN_LAB_ROSTER: DesignLabRosterEntry[] = [
 function App() {
   const location = useLocation();
   const navigate = useNavigate();
+  const evaluationSearchParams = new URLSearchParams(location.search);
+  const isEvaluationRoute = location.pathname === '/evaluation';
+  const evaluationSeasonId = evaluationSearchParams.get('seasonId');
+  const evaluationSessionId = evaluationSearchParams.get('sessionId');
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
@@ -658,7 +692,14 @@ function App() {
   const [tryoutSeasonDraft, setTryoutSeasonDraft] = useState<TryoutSeason | null>(null);
   const [newTryoutSeasonName, setNewTryoutSeasonName] = useState('');
   const [draggingTryoutPlayerId, setDraggingTryoutPlayerId] = useState<string | null>(null);
+  const [evaluationSessionContext, setEvaluationSessionContext] =
+    useState<EvaluationSessionContext | null>(null);
+  const [evaluationSessionLoading, setEvaluationSessionLoading] = useState(false);
+  const [evaluationSaveIndicators, setEvaluationSaveIndicators] = useState<
+    Record<string, EvaluationSaveIndicator>
+  >({});
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
+  const evaluationSaveVersionRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -766,7 +807,14 @@ function App() {
   }, [bootstrap]);
 
   useEffect(() => {
-    if (activeRole === 'club-admin' || activeRole === 'platform-admin') return;
+    const canAccessStaffTools =
+      activeRole === 'club-admin' ||
+      activeRole === 'platform-admin' ||
+      activeRole === 'staff' ||
+      activeRole === 'coach' ||
+      activeRole === 'manager';
+
+    if (canAccessStaffTools) return;
 
     setActiveAdminSection('overview');
     setAdminUsers([]);
@@ -940,13 +988,28 @@ function App() {
   }, [adminUsers, selectedAdminUserId]);
 
   useEffect(() => {
-    if (
-      activeRole !== 'club-admin' &&
-      activeRole !== 'platform-admin'
-    ) {
+    const canAccessEvaluationTemplates =
+      activeRole === 'club-admin' ||
+      activeRole === 'platform-admin' ||
+      activeRole === 'staff' ||
+      activeRole === 'coach' ||
+      activeRole === 'manager';
+
+    if (!canAccessEvaluationTemplates) {
       return;
     }
-    if (activeAdminSection !== 'templates') return;
+
+    const shouldLoadEvaluationTemplates =
+      activeAdminSection === 'templates' ||
+      (((activeRole === 'club-admin' || activeRole === 'platform-admin') &&
+        activeAdminSection === 'tryouts') ||
+        ((activeRole === 'staff' ||
+          activeRole === 'coach' ||
+          activeRole === 'manager') &&
+          activeUserSection === 'tryouts')) ||
+      isEvaluationRoute;
+
+    if (!shouldLoadEvaluationTemplates) return;
     if (!runtimeConfig || authSession?.status !== 'authenticated') return;
 
     const currentRuntimeConfig = runtimeConfig;
@@ -986,7 +1049,14 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeAdminSection, activeRole, authSession, runtimeConfig]);
+  }, [
+    activeAdminSection,
+    activeRole,
+    activeUserSection,
+    authSession,
+    isEvaluationRoute,
+    runtimeConfig,
+  ]);
 
   useEffect(() => {
     const selectedTemplate =
@@ -1067,6 +1137,66 @@ function App() {
       selectedSeason ? cloneTryoutSeasonState(selectedSeason) : null,
     );
   }, [selectedTryoutSeasonId, tryoutSeasons]);
+
+  useEffect(() => {
+    if (!isEvaluationRoute) {
+      setEvaluationSessionContext(null);
+      setEvaluationSessionLoading(false);
+      setEvaluationSaveIndicators({});
+      evaluationSaveVersionRef.current = {};
+      return;
+    }
+
+    if (!runtimeConfig || authSession?.status !== 'authenticated') return;
+    if (!evaluationSeasonId || !evaluationSessionId) {
+      setEvaluationSessionContext(null);
+      return;
+    }
+
+    const currentRuntimeConfig = runtimeConfig;
+    const currentIdToken = authSession.idToken;
+    const currentSeasonId = evaluationSeasonId;
+    const currentSessionId = evaluationSessionId;
+    let cancelled = false;
+
+    async function loadEvaluationContext() {
+      setEvaluationSessionLoading(true);
+
+      try {
+        const nextContext = await loadEvaluationSessionContext(
+          currentRuntimeConfig,
+          currentIdToken,
+          currentSeasonId,
+          currentSessionId,
+        );
+        if (cancelled) return;
+        setEvaluationSessionContext(nextContext);
+        setEvaluationSaveIndicators({});
+        evaluationSaveVersionRef.current = {};
+      } catch (error) {
+        if (cancelled) return;
+        setEvaluationSessionContext(null);
+        setFeedback({
+          tone: 'error',
+          message: getErrorMessage(error),
+        });
+      } finally {
+        if (!cancelled) setEvaluationSessionLoading(false);
+      }
+    }
+
+    void loadEvaluationContext();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    authSession,
+    evaluationSeasonId,
+    evaluationSessionId,
+    isEvaluationRoute,
+    runtimeConfig,
+  ]);
 
   async function runAction(
     actionKey: string,
@@ -1849,10 +1979,7 @@ function App() {
         authSession.idToken,
         updatedSeason.id,
       );
-      setFeedback({
-        tone: 'success',
-        message: 'Tryout setup changes have been saved.',
-      });
+      setFeedback(null);
     });
   }
 
@@ -1895,6 +2022,30 @@ function App() {
       setFeedback({
         tone: 'success',
         message: 'Tryout season deleted.',
+      });
+    });
+  }
+
+  async function handleDownloadTryoutSeasonReport(): Promise<void> {
+    if (
+      !runtimeConfig ||
+      authSession?.status !== 'authenticated' ||
+      !selectedTryoutSeasonId ||
+      !tryoutSeasonDraft
+    ) {
+      return;
+    }
+
+    await runAction(`download-tryout-season-report-${selectedTryoutSeasonId}`, async () => {
+      const response = await downloadTryoutSeasonReport(
+        runtimeConfig,
+        authSession.idToken,
+        selectedTryoutSeasonId,
+        tryoutSeasonDraft.name,
+      );
+      setFeedback({
+        tone: 'success',
+        message: `${response.fileName} downloaded.`,
       });
     });
   }
@@ -2142,6 +2293,7 @@ function App() {
           id: crypto.randomUUID(),
           name: `Session ${draft.sessions.length + 1}`,
           teamIds: [],
+          evaluationTemplateId: null,
         },
       ],
     }));
@@ -2155,6 +2307,23 @@ function App() {
           ? {
               ...session,
               name: value,
+            }
+          : session,
+        ),
+    }));
+  }
+
+  function updateTryoutSessionTemplate(
+    sessionId: string,
+    templateId: string | null,
+  ): void {
+    applyTryoutDraft((draft) => ({
+      ...draft,
+      sessions: draft.sessions.map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              evaluationTemplateId: templateId,
             }
           : session,
       ),
@@ -2186,6 +2355,151 @@ function App() {
       ...draft,
       sessions: draft.sessions.filter((session) => session.id !== sessionId),
     }));
+  }
+
+  function handleStartEvaluation(sessionId: string): void {
+    if (!tryoutSeasonDraft) return;
+
+    const targetSession =
+      tryoutSeasonDraft.sessions.find((session) => session.id === sessionId) ?? null;
+    if (!targetSession) return;
+
+    if (!targetSession.evaluationTemplateId) {
+      setFeedback({
+        tone: 'error',
+        message: 'Assign an evaluation template to this session before starting evaluation.',
+      });
+      return;
+    }
+
+    if (targetSession.teamIds.length === 0) {
+      setFeedback({
+        tone: 'error',
+        message: 'Attach at least one tryout team to this session before starting evaluation.',
+      });
+      return;
+    }
+
+    navigate(
+      `/evaluation?seasonId=${encodeURIComponent(
+        tryoutSeasonDraft.id,
+      )}&sessionId=${encodeURIComponent(sessionId)}`,
+    );
+  }
+
+  function handleExitEvaluation(): void {
+    if (activeRole === 'club-admin' || activeRole === 'platform-admin') {
+      setActiveAdminSection('tryouts');
+    } else {
+      setActiveUserSection('tryouts');
+    }
+
+    navigate('/');
+  }
+
+  function handleSaveEvaluationPlayerRecord(
+    playerId: string,
+    payload: {
+      scores: Record<string, EvaluationScoreValue | null>;
+      notes: EvaluationNote[];
+    },
+  ): void {
+    if (
+      !runtimeConfig ||
+      authSession?.status !== 'authenticated' ||
+      !evaluationSessionContext
+    ) {
+      return;
+    }
+
+    const previousRecord =
+      evaluationSessionContext.records.find((record) => record.playerId === playerId) ?? null;
+    const nextVersion =
+      (evaluationSaveVersionRef.current[playerId] ?? 0) + 1;
+    evaluationSaveVersionRef.current[playerId] = nextVersion;
+
+    const optimisticRecord = buildOptimisticEvaluationRecord(
+      evaluationSessionContext,
+      playerId,
+      payload.scores,
+      payload.notes,
+      previousRecord,
+    );
+
+    setEvaluationSessionContext((currentValue) =>
+      currentValue
+        ? {
+            ...currentValue,
+            records: upsertEvaluationRecordState(
+              currentValue.records,
+              playerId,
+              optimisticRecord,
+            ),
+          }
+        : currentValue,
+    );
+    setEvaluationSaveIndicators((currentValue) => ({
+      ...currentValue,
+      [playerId]: {
+        state: 'saving',
+        message: 'Saving...',
+      },
+    }));
+
+    void updatePlayerEvaluationRecord(
+      runtimeConfig,
+      authSession.idToken,
+      evaluationSessionContext.seasonId,
+      evaluationSessionContext.session.id,
+      playerId,
+      payload,
+    )
+      .then((response) => {
+        if ((evaluationSaveVersionRef.current[playerId] ?? 0) !== nextVersion) return;
+
+        setEvaluationSessionContext((currentValue) =>
+          currentValue
+            ? {
+                ...currentValue,
+                records: upsertEvaluationRecordState(
+                  currentValue.records,
+                  playerId,
+                  response.record,
+                ),
+              }
+            : currentValue,
+        );
+        setEvaluationSaveIndicators((currentValue) => ({
+          ...currentValue,
+          [playerId]: {
+            state: 'saved',
+            message: 'Saved',
+          },
+        }));
+      })
+      .catch((error) => {
+        if ((evaluationSaveVersionRef.current[playerId] ?? 0) !== nextVersion) return;
+
+        setEvaluationSessionContext((currentValue) =>
+          currentValue
+            ? {
+                ...currentValue,
+                records: upsertEvaluationRecordState(
+                  currentValue.records,
+                  playerId,
+                  previousRecord,
+                ),
+              }
+            : currentValue,
+        );
+        setEvaluationSaveIndicators((currentValue) => ({
+          ...currentValue,
+          [playerId]: {
+            state: 'error',
+            message: getErrorMessage(error),
+          },
+        }));
+      });
   }
 
   async function handleSavePlayer(nextStatus: IntakeStatus): Promise<void> {
@@ -2370,6 +2684,20 @@ function App() {
     activeRole,
     bootstrap.user.primaryRole,
   );
+
+  if (isEvaluationRoute) {
+    return (
+      <EvaluationWorkspace
+        context={evaluationSessionContext}
+        loading={evaluationSessionLoading}
+        feedback={feedback}
+        saveIndicators={evaluationSaveIndicators}
+        onExit={handleExitEvaluation}
+        onSavePlayerRecord={handleSaveEvaluationPlayerRecord}
+      />
+    );
+  }
+
   const selectedAdminUser =
     selectedAdminUserId
       ? adminUsers.find((user) => user.userId === selectedAdminUserId) ?? null
@@ -2392,6 +2720,7 @@ function App() {
       draft={tryoutSeasonDraft}
       loaded={tryoutSeasonsLoaded}
       loading={tryoutSeasonsLoading}
+      evaluationTemplates={evaluationTemplates}
       newSeasonName={newTryoutSeasonName}
       busyAction={busyAction}
       draggingPlayerId={draggingTryoutPlayerId}
@@ -2402,6 +2731,9 @@ function App() {
       onSelectSeason={setSelectedTryoutSeasonId}
       onDeleteSeason={() => {
         void handleDeleteSelectedTryoutSeason();
+      }}
+      onDownloadReport={() => {
+        void handleDownloadTryoutSeasonReport();
       }}
       onSeasonNameChange={updateTryoutSeasonName}
       onSaveSeason={() => {
@@ -2420,8 +2752,10 @@ function App() {
       onUpdatePlayerJersey={updateTryoutPlayerJersey}
       onAddSession={addTryoutSession}
       onUpdateSessionName={updateTryoutSessionName}
+      onUpdateSessionTemplate={updateTryoutSessionTemplate}
       onToggleSessionTeam={toggleTryoutSessionTeam}
       onRemoveSession={removeTryoutSession}
+      onStartEvaluation={handleStartEvaluation}
       onStartPlayerDrag={setDraggingTryoutPlayerId}
     />
   );
@@ -6253,6 +6587,7 @@ function TryoutSetupCard({
   draft,
   loaded,
   loading,
+  evaluationTemplates,
   newSeasonName,
   busyAction,
   draggingPlayerId,
@@ -6260,6 +6595,7 @@ function TryoutSetupCard({
   onCreateSeason,
   onSelectSeason,
   onDeleteSeason,
+  onDownloadReport,
   onSeasonNameChange,
   onSaveSeason,
   onAddGroup,
@@ -6275,8 +6611,10 @@ function TryoutSetupCard({
   onUpdatePlayerJersey,
   onAddSession,
   onUpdateSessionName,
+  onUpdateSessionTemplate,
   onToggleSessionTeam,
   onRemoveSession,
+  onStartEvaluation,
   onStartPlayerDrag,
 }: TryoutSetupCardProps) {
   const birthYearOptions = buildTryoutBirthYearOptions(draft?.players ?? []);
@@ -6499,6 +6837,16 @@ function TryoutSetupCard({
                 </p>
               </div>
               <div className="action-row">
+                <IconLabelActionButton
+                  label={
+                    busyAction === `download-tryout-season-report-${draft.id}`
+                      ? 'Building report...'
+                      : 'Download report'
+                  }
+                  icon="save"
+                  onClick={onDownloadReport}
+                  disabled={busyAction === `download-tryout-season-report-${draft.id}`}
+                />
                 <IconLabelActionButton
                   label={
                     busyAction === `delete-tryout-season-${draft.id}`
@@ -6898,6 +7246,43 @@ function TryoutSetupCard({
                       />
                     </div>
 
+                    <div className="criterion-settings-grid">
+                      <label className="field">
+                        <span>Evaluation template</span>
+                        <select
+                          value={session.evaluationTemplateId ?? ''}
+                          onChange={(event) => {
+                            onUpdateSessionTemplate(
+                              session.id,
+                              event.target.value || null,
+                            );
+                          }}
+                        >
+                          <option value="">Select template</option>
+                          {evaluationTemplates.map((template) => (
+                            <option key={template.id} value={template.id}>
+                              {template.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className="tryout-session-actions">
+                        <span className="status-chip">
+                          {session.teamIds.length} team{session.teamIds.length === 1 ? '' : 's'}
+                        </span>
+                        <IconLabelActionButton
+                          label="Start evaluation"
+                          icon="save"
+                          onClick={() => {
+                            onStartEvaluation(session.id);
+                          }}
+                          disabled={
+                            !session.evaluationTemplateId || session.teamIds.length === 0
+                          }
+                        />
+                      </div>
+                    </div>
+
                     <div className="chip-list">
                       {teams.length === 0 ? (
                         <div className="stack-card">
@@ -6935,6 +7320,552 @@ function TryoutSetupCard({
         </>
       ) : null}
     </article>
+  );
+}
+
+function EvaluationWorkspace({
+  context,
+  loading,
+  feedback,
+  saveIndicators,
+  onExit,
+  onSavePlayerRecord,
+}: EvaluationWorkspaceProps) {
+  const teams = context?.teams ?? [];
+  const players = teams.flatMap((team) => team.players);
+  const evaluatedPlayerIds = new Set(
+    (context?.records ?? [])
+      .filter((record) => hasEvaluationRecordContent(record.scores, record.notes))
+      .map((record) => record.playerId),
+  );
+  const [selectedPlayerIdState, setSelectedPlayerIdState] = useState<string | null>(null);
+  const selectedPlayerId = players.some((player) => player.playerId === selectedPlayerIdState)
+    ? selectedPlayerIdState
+    : players[0]?.playerId ?? null;
+
+  const selectedPlayer =
+    selectedPlayerId
+      ? players.find((player) => player.playerId === selectedPlayerId) ?? null
+      : null;
+  const selectedRecord =
+    context && selectedPlayer
+      ? context.records.find((record) => record.playerId === selectedPlayer.playerId) ??
+        buildEmptyEvaluationRecordState(context, selectedPlayer.playerId)
+      : null;
+  const selectedSaveIndicator =
+    selectedPlayerId ? saveIndicators[selectedPlayerId] ?? null : null;
+
+  function handleScoreChange(
+    criterionId: string,
+    value: EvaluationScoreValue,
+  ): void {
+    if (!selectedPlayer || !selectedRecord) return;
+
+    onSavePlayerRecord(selectedPlayer.playerId, {
+      scores: {
+        ...selectedRecord.scores,
+        [criterionId]:
+          selectedRecord.scores[criterionId] === value ? null : value,
+      },
+      notes: selectedRecord.notes,
+    });
+  }
+
+  return (
+    <div className="evaluation-shell">
+      {feedback?.tone === 'error' ? (
+        <div className={`feedback-banner feedback-banner--${feedback.tone}`}>
+          {feedback.message}
+        </div>
+      ) : null}
+
+      {loading ? (
+        <div className="evaluation-empty-state">
+          <strong>Loading evaluation session...</strong>
+          <p>Pulling the roster, player snapshots, and the assigned score sheet.</p>
+        </div>
+      ) : !context ? (
+        <div className="evaluation-empty-state">
+          <strong>Evaluation session unavailable</strong>
+          <p>
+            Return to tryout setup, confirm the session exists, and make sure it
+            has an evaluation template assigned.
+          </p>
+        </div>
+      ) : players.length === 0 ? (
+        <div className="evaluation-empty-state">
+          <strong>No players are loaded into this session</strong>
+          <p>
+            Attach teams with rostered players to the session before starting
+            evaluation mode.
+          </p>
+        </div>
+      ) : (
+        <div className="evaluation-shell__layout">
+          <aside className="evaluation-roster">
+            <div className="evaluation-roster__scroll">
+              {teams.map((team) => (
+                <EvaluationRosterTeam
+                  key={team.id}
+                  team={team}
+                  selectedPlayerId={selectedPlayerId}
+                  evaluatedPlayerIds={evaluatedPlayerIds}
+                  onSelectPlayer={(playerId) => {
+                    setSelectedPlayerIdState(playerId);
+                  }}
+                />
+              ))}
+            </div>
+            <div className="evaluation-roster__footer">
+              <div className="evaluation-roster__meta">
+                <span className="status-chip">{context.session.name}</span>
+                <span className="status-chip">{context.template.name}</span>
+                {selectedSaveIndicator ? (
+                  <span
+                    className={`status-chip ${
+                      selectedSaveIndicator.state === 'error'
+                        ? 'status-chip--warning'
+                        : ''
+                    }`}
+                  >
+                    {selectedSaveIndicator.message}
+                  </span>
+                ) : null}
+              </div>
+              <button className="ghost-button evaluation-exit-button" type="button" onClick={onExit}>
+                Exit evaluation
+              </button>
+            </div>
+          </aside>
+
+          <section className="evaluation-panel">
+            {selectedPlayer && selectedRecord ? (
+              <>
+                <EvaluationPlayerHeader
+                  key={`${context.session.id}-${selectedPlayer.playerId}`}
+                  player={selectedPlayer}
+                  record={selectedRecord}
+                />
+
+                <div className="evaluation-criteria-list">
+                  {context.template.criteria.map((criterion) => (
+                    <EvaluationCriterionRow
+                      key={criterion.id}
+                      criterion={criterion}
+                      value={selectedRecord.scores[criterion.id] ?? null}
+                      onChange={(value) => {
+                        handleScoreChange(criterion.id, value);
+                      }}
+                    />
+                  ))}
+                </div>
+
+                <div className="evaluation-notes">
+                  <EvaluationNotesPanel
+                    key={`${context.session.id}-${selectedPlayer.playerId}`}
+                    record={selectedRecord}
+                    onSave={(notes) => {
+                      onSavePlayerRecord(selectedPlayer.playerId, {
+                        scores: selectedRecord.scores,
+                        notes,
+                      });
+                    }}
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="evaluation-empty-state evaluation-empty-state--panel">
+                <strong>Select a jersey number to begin</strong>
+                <p>
+                  The roster stays on the left so evaluators can move between
+                  players without leaving the scoring surface.
+                </p>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EvaluationRosterTeam({
+  team,
+  selectedPlayerId,
+  evaluatedPlayerIds,
+  onSelectPlayer,
+}: {
+  team: EvaluationSessionContext['teams'][number];
+  selectedPlayerId: string | null;
+  evaluatedPlayerIds: Set<string>;
+  onSelectPlayer: (playerId: string) => void;
+}) {
+  const pendingPlayers = team.players.filter(
+    (player) => !evaluatedPlayerIds.has(player.playerId),
+  );
+  const completedPlayers = team.players.filter((player) =>
+    evaluatedPlayerIds.has(player.playerId),
+  );
+
+  function renderPlayerButton(
+    player: EvaluationSessionContext['teams'][number]['players'][number],
+  ) {
+    return (
+      <button
+        key={player.playerId}
+        className={`evaluation-jersey-button ${
+          player.playerId === selectedPlayerId
+            ? 'evaluation-jersey-button--active'
+            : ''
+        }`}
+        type="button"
+        onClick={() => {
+          onSelectPlayer(player.playerId);
+        }}
+        aria-label={`${player.displayName}, jersey ${player.jerseyNumber || 'unset'}`}
+        title={player.displayName}
+      >
+        {player.jerseyNumber || '--'}
+      </button>
+    );
+  }
+
+  return (
+    <section className="evaluation-roster__team">
+      <div className="evaluation-roster__team-header">
+        <div>
+          <strong>{team.name}</strong>
+          <span>{team.groupName}</span>
+        </div>
+        <span className="status-chip">{team.players.length}</span>
+      </div>
+
+      {pendingPlayers.length > 0 ? (
+        <div className="evaluation-roster__grid">
+          {pendingPlayers.map(renderPlayerButton)}
+        </div>
+      ) : null}
+
+      {completedPlayers.length > 0 ? (
+        <>
+          <div className="evaluation-roster__divider" aria-hidden="true" />
+          <div className="evaluation-roster__grid evaluation-roster__grid--completed">
+            {completedPlayers.map(renderPlayerButton)}
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function EvaluationScoreSlider({
+  value,
+  onChange,
+}: {
+  value: EvaluationScoreValue | null;
+  onChange: (value: EvaluationScoreValue) => void;
+}) {
+  return (
+    <div className="evaluation-score-slider" role="group" aria-label="Evaluation score">
+      {([1, 2, 3, 4, 5] as EvaluationScoreValue[]).map((score) => (
+        <button
+          key={score}
+          className={`evaluation-score-slider__step ${
+            value === score ? 'evaluation-score-slider__step--active' : ''
+          }`}
+          type="button"
+          onClick={() => {
+            onChange(score);
+          }}
+          aria-label={`Score ${score}${value === score ? ', selected' : ''}`}
+        >
+          <span className="evaluation-score-slider__dot" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function EvaluationPlayerHeader({
+  player,
+  record,
+}: {
+  player: EvaluationSessionContext['teams'][number]['players'][number];
+  record: EvaluationSessionContext['records'][number];
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const playerItems = buildEvaluationPlayerDetailItems(player);
+  const intakeItems = buildEvaluationIntakeDetailItems(player.intake);
+  const headerName = getEvaluationPlayerHeading(player);
+
+  return (
+    <div className="evaluation-player-sticky">
+      <button
+        className={`evaluation-player-bar ${
+          isOpen ? 'evaluation-player-bar--open' : ''
+        }`}
+        type="button"
+        onClick={() => {
+          setIsOpen((currentValue) => !currentValue);
+        }}
+        aria-expanded={isOpen}
+      >
+        <div className="evaluation-player-bar__identity">
+          <h2>{headerName}</h2>
+          <div className="evaluation-player-bar__chips">
+            <span className="status-chip">{player.groupName}</span>
+            <span className="status-chip">{player.teamName}</span>
+            <span className="status-chip">
+              {record.notes.length} note{record.notes.length === 1 ? '' : 's'}
+            </span>
+          </div>
+        </div>
+        <span className="evaluation-player-bar__toggle" aria-hidden="true">
+          {isOpen ? 'v' : '>'}
+        </span>
+      </button>
+
+      {isOpen ? (
+        <div className="evaluation-player-drawer">
+          <div className="evaluation-player-drawer__section">
+            <div className="evaluation-player-drawer__grid">
+              {playerItems.map((item) => (
+                <div
+                  key={item.label}
+                  className="evaluation-player-drawer__item"
+                  title={item.value}
+                >
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {intakeItems.length > 0 ? (
+            <div className="evaluation-player-drawer__section">
+              <div className="evaluation-player-drawer__grid">
+                {intakeItems.map((item) => (
+                  <div
+                    key={item.label}
+                    className="evaluation-player-drawer__item"
+                    title={item.value}
+                  >
+                    <span>{item.label}</span>
+                    <strong>{item.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function EvaluationCriterionRow({
+  criterion,
+  value,
+  onChange,
+}: {
+  criterion: EvaluationCriterion;
+  value: EvaluationScoreValue | null;
+  onChange: (value: EvaluationScoreValue) => void;
+}) {
+  const [guideOpen, setGuideOpen] = useState(false);
+
+  return (
+    <article className="evaluation-criterion-card">
+      <div className="evaluation-criterion-row">
+        <button
+          className={`evaluation-criterion-title ${
+            guideOpen ? 'evaluation-criterion-title--open' : ''
+          }`}
+          type="button"
+          onClick={() => {
+            setGuideOpen((currentValue) => !currentValue);
+          }}
+          aria-expanded={guideOpen}
+        >
+          {criterion.title}
+        </button>
+
+        <EvaluationScoreSlider value={value} onChange={onChange} />
+
+        <span className="status-chip">W {criterion.weight}</span>
+      </div>
+
+      {guideOpen ? (
+        <div className="evaluation-criterion-guide">
+          <div className="evaluation-criterion-guide__grid">
+            <div>
+              <span>1</span>
+              <p>{criterion.score1Description}</p>
+            </div>
+            <div>
+              <span>3</span>
+              <p>{criterion.score3Description}</p>
+            </div>
+            <div>
+              <span>5</span>
+              <p>{criterion.score5Description}</p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function EvaluationNotesPanel({
+  record,
+  onSave,
+}: {
+  record: EvaluationSessionContext['records'][number];
+  onSave: (notes: EvaluationNote[]) => void;
+}) {
+  const [newNoteText, setNewNoteText] = useState('');
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteText, setEditingNoteText] = useState('');
+
+  function handleAddNote(): void {
+    const trimmedText = newNoteText.trim();
+    if (!trimmedText) return;
+
+    const now = new Date().toISOString();
+    onSave([
+      ...record.notes,
+      {
+        id: crypto.randomUUID(),
+        text: trimmedText,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    setNewNoteText('');
+  }
+
+  function handleDeleteNote(noteId: string): void {
+    onSave(record.notes.filter((note) => note.id !== noteId));
+
+    if (editingNoteId === noteId) {
+      setEditingNoteId(null);
+      setEditingNoteText('');
+    }
+  }
+
+  function commitEditedNote(): void {
+    if (!editingNoteId) return;
+    const trimmedText = editingNoteText.trim();
+
+    if (!trimmedText) {
+      handleDeleteNote(editingNoteId);
+      return;
+    }
+
+    onSave(
+      record.notes.map((note) =>
+        note.id === editingNoteId
+          ? {
+              ...note,
+              text: trimmedText,
+              updatedAt: new Date().toISOString(),
+            }
+          : note,
+      ),
+    );
+    setEditingNoteId(null);
+    setEditingNoteText('');
+  }
+
+  return (
+    <>
+      <div className="evaluation-note-entry">
+        <input
+          type="text"
+          value={newNoteText}
+          onChange={(event) => {
+            setNewNoteText(event.target.value);
+          }}
+          placeholder="Add a quick observation for this player"
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              handleAddNote();
+            }
+          }}
+        />
+        <IconActionButton
+          label="Save note"
+          icon="save"
+          onClick={handleAddNote}
+          disabled={!newNoteText.trim()}
+        />
+      </div>
+
+      <div className="evaluation-note-list">
+        {record.notes.length === 0 ? (
+          <div className="stack-card">
+            <div>
+              <strong>No notes yet</strong>
+              <p>
+                Quick note entry stays available here while scores save
+                instantly above.
+              </p>
+            </div>
+          </div>
+        ) : (
+          record.notes.map((note) => (
+            <div key={note.id} className="evaluation-note-row">
+              {editingNoteId === note.id ? (
+                <input
+                  className="evaluation-note-row__input"
+                  type="text"
+                  value={editingNoteText}
+                  autoFocus
+                  onChange={(event) => {
+                    setEditingNoteText(event.target.value);
+                  }}
+                  onBlur={() => {
+                    commitEditedNote();
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      commitEditedNote();
+                    }
+                    if (event.key === 'Escape') {
+                      setEditingNoteId(null);
+                      setEditingNoteText('');
+                    }
+                  }}
+                />
+              ) : (
+                <button
+                  className="evaluation-note-row__text"
+                  type="button"
+                  onClick={() => {
+                    setEditingNoteId(note.id);
+                    setEditingNoteText(note.text);
+                  }}
+                >
+                  {note.text}
+                </button>
+              )}
+              <IconActionButton
+                label="Delete note"
+                icon="delete"
+                danger
+                onClick={() => {
+                  handleDeleteNote(note.id);
+                }}
+              />
+            </div>
+          ))
+        )}
+      </div>
+    </>
   );
 }
 
@@ -7072,6 +8003,7 @@ function cloneTryoutSeasonState(season: TryoutSeason): TryoutSeason {
     sessions: season.sessions.map((session) => ({
       ...session,
       teamIds: [...session.teamIds],
+      evaluationTemplateId: session.evaluationTemplateId ?? null,
     })),
     playerOverrides: season.playerOverrides.map((override) => ({ ...override })),
     players: season.players.map((player) => ({
@@ -7095,6 +8027,7 @@ function recalculateTryoutSeasonDraft(season: TryoutSeason): TryoutSeason {
   const sessions = season.sessions.map((session) => ({
     ...session,
     teamIds: session.teamIds.filter((teamId) => teamMap.has(teamId)),
+    evaluationTemplateId: session.evaluationTemplateId ?? null,
   }));
   const rawPlayerIdSet = new Set(season.players.map((player) => player.playerId));
   const normalizedOverrides = season.playerOverrides
@@ -7309,6 +8242,118 @@ function getTryoutTeamLabel(
 ): string {
   if (!teamId) return 'Unassigned';
   return teams.find((team) => team.id === teamId)?.name ?? 'Unknown team';
+}
+
+function buildEmptyEvaluationRecordState(
+  context: EvaluationSessionContext,
+  playerId: string,
+): EvaluationSessionContext['records'][number] {
+  return {
+    playerId,
+    seasonId: context.seasonId,
+    sessionId: context.session.id,
+    evaluatorUserId: context.evaluator.userId,
+    evaluatorName: context.evaluator.displayName,
+    templateId: context.template.id,
+    scores: Object.fromEntries(
+      context.template.criteria.map((criterion) => [criterion.id, null]),
+    ) as Record<string, EvaluationScoreValue | null>,
+    notes: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function buildOptimisticEvaluationRecord(
+  context: EvaluationSessionContext,
+  playerId: string,
+  scores: Record<string, EvaluationScoreValue | null>,
+  notes: EvaluationNote[],
+  existingRecord: EvaluationSessionContext['records'][number] | null,
+): EvaluationSessionContext['records'][number] | null {
+  if (!hasEvaluationRecordContent(scores, notes)) {
+    return null;
+  }
+
+  const baseRecord =
+    existingRecord ?? buildEmptyEvaluationRecordState(context, playerId);
+  const now = new Date().toISOString();
+
+  return {
+    ...baseRecord,
+    scores: { ...scores },
+    notes: notes.map((note) => ({ ...note })),
+    updatedAt: now,
+  };
+}
+
+function upsertEvaluationRecordState(
+  records: EvaluationSessionContext['records'],
+  playerId: string,
+  nextRecord: EvaluationSessionContext['records'][number] | null,
+): EvaluationSessionContext['records'] {
+  const remainingRecords = records.filter((record) => record.playerId !== playerId);
+  return nextRecord ? [...remainingRecords, nextRecord] : remainingRecords;
+}
+
+function hasEvaluationRecordContent(
+  scores: Record<string, EvaluationScoreValue | null>,
+  notes: EvaluationNote[],
+): boolean {
+  return Object.values(scores).some((score) => score !== null) || notes.length > 0;
+}
+
+function buildEvaluationPlayerDetailItems(
+  player: EvaluationSessionContext['teams'][number]['players'][number],
+): Array<{ label: string; value: string }> {
+  return [
+    ['Last team', player.lastTeamName || 'Not added'],
+    ['Pos', player.position || 'Not added'],
+    ['Ht', player.heightDisplay],
+    ['Wt', player.weightDisplay],
+    [
+      'Years',
+      player.yearsPlaying === null ? 'Not added' : String(player.yearsPlaying),
+    ],
+    ['Completed', player.completedBy],
+    ['Birth', player.birthYear || 'Not added'],
+  ]
+    .filter(([, value]) => Boolean(value.trim()))
+    .map(([label, value]) => ({
+      label,
+      value,
+    }));
+}
+
+function getEvaluationPlayerHeading(
+  player: EvaluationSessionContext['teams'][number]['players'][number],
+): string {
+  const birthYearSuffix =
+    player.birthYear && player.birthYear.length >= 2
+      ? ` (${player.birthYear.slice(-2)})`
+      : '';
+  const baseName = birthYearSuffix && player.displayName.endsWith(birthYearSuffix)
+    ? player.displayName.slice(0, -birthYearSuffix.length)
+    : player.displayName.replace(/\s+\(\d{2}\)$/, '');
+  return `${baseName} #${player.jerseyNumber || '--'}`;
+}
+
+function buildEvaluationIntakeDetailItems(
+  intake: IntakeAnswers,
+): Array<{ label: string; value: string }> {
+  return [
+    ['Next', intake.nextSeasonOutcome],
+    ['Setting', intake.developmentSetting],
+    ['Role', intake.preferredRole],
+    ['Style', intake.coachingStyle],
+    ['Consider', intake.participationConsiderations],
+    ['Insight', intake.additionalInsight],
+  ]
+    .filter(([, value]) => Boolean(value.trim()))
+    .map(([label, value]) => ({
+      label,
+      value,
+    }));
 }
 
 function toggleOrganizationRole(
