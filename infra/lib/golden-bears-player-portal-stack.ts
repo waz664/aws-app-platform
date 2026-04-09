@@ -23,20 +23,20 @@ import { Construct } from 'constructs';
 import type { EnvironmentConfig } from '../config/environments.js';
 import { SharedIdentityStack } from './shared-identity-stack.js';
 
-type CondoOpsStackProps = StackProps & {
+type GoldenBearsPlayerPortalStackProps = StackProps & {
   environmentConfig: EnvironmentConfig;
   sharedIdentity: SharedIdentityStack;
 };
 
-export class CondoOpsStack extends Stack {
-  constructor(scope: Construct, id: string, props: CondoOpsStackProps) {
+export class GoldenBearsPlayerPortalStack extends Stack {
+  constructor(scope: Construct, id: string, props: GoldenBearsPlayerPortalStackProps) {
     super(scope, id, props);
 
     const isProduction = props.environmentConfig.name === 'prod';
     const removalPolicy = isProduction ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY;
 
-    const dataTable = new dynamodb.Table(this, 'CondoOpsDataTable', {
-      tableName: `condo-ops-data-${props.environmentConfig.name}`,
+    const dataTable = new dynamodb.Table(this, 'PlayerPortalDataTable', {
+      tableName: `golden-bears-player-portal-data-${props.environmentConfig.name}`,
       partitionKey: {
         name: 'pk',
         type: dynamodb.AttributeType.STRING,
@@ -50,6 +50,32 @@ export class CondoOpsStack extends Stack {
         pointInTimeRecoveryEnabled: isProduction,
       },
       removalPolicy,
+    });
+
+    dataTable.addGlobalSecondaryIndex({
+      indexName: 'gsi1',
+      partitionKey: {
+        name: 'gsi1pk',
+        type: dynamodb.AttributeType.STRING,
+      },
+      sortKey: {
+        name: 'gsi1sk',
+        type: dynamodb.AttributeType.STRING,
+      },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+
+    dataTable.addGlobalSecondaryIndex({
+      indexName: 'gsi2',
+      partitionKey: {
+        name: 'gsi2pk',
+        type: dynamodb.AttributeType.STRING,
+      },
+      sortKey: {
+        name: 'gsi2sk',
+        type: dynamodb.AttributeType.STRING,
+      },
+      projectionType: dynamodb.ProjectionType.ALL,
     });
 
     const websiteBucket = new s3.Bucket(this, 'WebBucket', {
@@ -85,7 +111,7 @@ export class CondoOpsStack extends Stack {
     const publicWebUrl = `https://${distribution.distributionDomainName}`;
     const authIssuer = `https://cognito-idp.${this.region}.${Stack.of(this).urlSuffix}/${props.sharedIdentity.userPool.userPoolId}`;
 
-    const userPoolClient = new cognito.UserPoolClient(this, 'CondoOpsWebClient', {
+    const userPoolClient = new cognito.UserPoolClient(this, 'PlayerPortalWebClient', {
       userPool: props.sharedIdentity.userPool,
       authFlows: {
         userSrp: true,
@@ -117,14 +143,14 @@ export class CondoOpsStack extends Stack {
       idTokenValidity: Duration.hours(1),
     });
 
-    const apiLogGroup = new logs.LogGroup(this, 'CondoOpsApiLogs', {
+    const apiLogGroup = new logs.LogGroup(this, 'PlayerPortalApiLogs', {
       retention: logs.RetentionDays.ONE_WEEK,
       removalPolicy,
     });
 
-    const apiHandler = new lambdaNodejs.NodejsFunction(this, 'CondoOpsApiHandler', {
+    const apiHandler = new lambdaNodejs.NodejsFunction(this, 'PlayerPortalApiHandler', {
       runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.resolve(process.cwd(), '../services/condo-ops-api/src/index.ts'),
+      entry: path.resolve(process.cwd(), '../services/golden-bears-player-portal-api/src/index.ts'),
       handler: 'handler',
       memorySize: 512,
       timeout: Duration.seconds(10),
@@ -135,7 +161,7 @@ export class CondoOpsStack extends Stack {
         sourceMap: true,
       },
       environment: {
-        APP_KEY: 'condo-ops',
+        APP_KEY: 'golden-bears-player-portal',
         APP_DATA_TABLE_NAME: dataTable.tableName,
         APP_ACCESS_TABLE_NAME: props.sharedIdentity.appAccessTable.tableName,
         BOOTSTRAP_ADMIN_EMAIL: props.environmentConfig.bootstrapAdminEmail,
@@ -144,10 +170,10 @@ export class CondoOpsStack extends Stack {
     });
 
     dataTable.grantReadWriteData(apiHandler);
-    props.sharedIdentity.appAccessTable.grantReadData(apiHandler);
+    props.sharedIdentity.appAccessTable.grantReadWriteData(apiHandler);
 
-    const httpApi = new apigwv2.HttpApi(this, 'CondoOpsHttpApi', {
-      apiName: `condo-ops-${props.environmentConfig.name}`,
+    const httpApi = new apigwv2.HttpApi(this, 'PlayerPortalHttpApi', {
+      apiName: `golden-bears-player-portal-${props.environmentConfig.name}`,
       createDefaultStage: true,
       corsPreflight: {
         allowHeaders: [
@@ -174,7 +200,7 @@ export class CondoOpsStack extends Stack {
       identitySource: [
         '$request.header.Authorization',
       ],
-      name: 'CondoOpsJwtAuthorizer',
+      name: 'GoldenBearsPlayerPortalJwtAuthorizer',
       jwtConfiguration: {
         audience: [
           userPoolClient.userPoolClientId,
@@ -189,41 +215,81 @@ export class CondoOpsStack extends Stack {
       target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
     });
 
-    new apigwv2.CfnRoute(this, 'DashboardRoute', {
+    new apigwv2.CfnRoute(this, 'BootstrapRoute', {
       apiId: httpApi.apiId,
-      routeKey: 'GET /dashboard',
+      routeKey: 'GET /bootstrap',
       target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
       authorizationType: 'JWT',
       authorizerId: jwtAuthorizer.ref,
     });
 
-    new apigwv2.CfnRoute(this, 'BookingsRoute', {
+    new apigwv2.CfnRoute(this, 'ClaimAdminRoute', {
       apiId: httpApi.apiId,
-      routeKey: 'GET /bookings',
+      routeKey: 'POST /access/claim-admin',
       target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
       authorizationType: 'JWT',
       authorizerId: jwtAuthorizer.ref,
     });
 
-    new apigwv2.CfnRoute(this, 'TransactionsRoute', {
+    new apigwv2.CfnRoute(this, 'ProfileGetRoute', {
       apiId: httpApi.apiId,
-      routeKey: 'GET /transactions',
+      routeKey: 'PUT /profile',
       target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
       authorizationType: 'JWT',
       authorizerId: jwtAuthorizer.ref,
     });
 
-    new apigwv2.CfnRoute(this, 'TasksRoute', {
+    new apigwv2.CfnRoute(this, 'OrganizationUpdateRoute', {
       apiId: httpApi.apiId,
-      routeKey: 'GET /tasks',
+      routeKey: 'PUT /organization',
       target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
       authorizationType: 'JWT',
       authorizerId: jwtAuthorizer.ref,
     });
 
-    new apigwv2.CfnRoute(this, 'ProfileRoute', {
+    new apigwv2.CfnRoute(this, 'PlayersCreateRoute', {
       apiId: httpApi.apiId,
-      routeKey: 'GET /me',
+      routeKey: 'POST /players',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
+    new apigwv2.CfnRoute(this, 'PlayersUpdateRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'PATCH /players/{playerId}',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
+    new apigwv2.CfnRoute(this, 'InvitesCreateRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'POST /players/{playerId}/invites',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
+    new apigwv2.CfnRoute(this, 'InviteAcceptRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'POST /invites/{inviteId}/accept',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
+    new apigwv2.CfnRoute(this, 'InviteDeclineRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'POST /invites/{inviteId}/decline',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
+    new apigwv2.CfnRoute(this, 'InviteRevokeRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'POST /invites/{inviteId}/revoke',
       target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
       authorizationType: 'JWT',
       authorizerId: jwtAuthorizer.ref,
@@ -235,7 +301,7 @@ export class CondoOpsStack extends Stack {
       sourceArn: `arn:aws:execute-api:${this.region}:${this.account}:${httpApi.apiId}/*/*/*`,
     });
 
-    const webBuildPath = path.resolve(process.cwd(), '../apps/condo-ops-web/dist');
+    const webBuildPath = path.resolve(process.cwd(), '../apps/golden-bears-player-portal-web/dist');
     const placeholderWebPath = path.resolve(process.cwd(), 'static/placeholder-site');
 
     const assetPath = fs.existsSync(path.join(webBuildPath, 'index.html'))
@@ -249,10 +315,10 @@ export class CondoOpsStack extends Stack {
           'runtime-config.json',
           {
             mode: 'aws',
-            appName: 'Condo Ops',
-            appKey: 'condo-ops',
+            appName: 'Golden Bears Player Portal',
+            appKey: 'golden-bears-player-portal',
             region: props.environmentConfig.region,
-            plannedDomain: props.environmentConfig.plannedWebDomains.condoOps,
+            plannedDomain: props.environmentConfig.plannedWebDomains.goldenBearsPlayerPortal,
             apiBaseUrl: httpApi.apiEndpoint,
             auth: {
               userPoolId: props.sharedIdentity.userPool.userPoolId,
@@ -261,7 +327,7 @@ export class CondoOpsStack extends Stack {
               redirectSignIn: `${publicWebUrl}/auth/callback`,
               redirectSignOut: publicWebUrl,
             },
-          }
+          },
         ),
       ],
       destinationBucket: websiteBucket,
@@ -270,19 +336,19 @@ export class CondoOpsStack extends Stack {
       prune: true,
     });
 
-    new CfnOutput(this, 'CondoOpsWebUrl', {
+    new CfnOutput(this, 'GoldenBearsPlayerPortalWebUrl', {
       value: publicWebUrl,
     });
 
-    new CfnOutput(this, 'CondoOpsApiUrl', {
+    new CfnOutput(this, 'GoldenBearsPlayerPortalApiUrl', {
       value: httpApi.apiEndpoint,
     });
 
-    new CfnOutput(this, 'CondoOpsUserPoolClientId', {
+    new CfnOutput(this, 'GoldenBearsPlayerPortalUserPoolClientId', {
       value: userPoolClient.userPoolClientId,
     });
 
-    new CfnOutput(this, 'CondoOpsDataTableName', {
+    new CfnOutput(this, 'GoldenBearsPlayerPortalDataTableName', {
       value: dataTable.tableName,
     });
   }

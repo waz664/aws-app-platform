@@ -3,6 +3,7 @@
 This repo is the reusable AWS baseline for low-cost web applications under `waz664`, and it now includes the first real starter app:
 
 - `Condo Ops`: a Myrtle Beach vacation rental operations dashboard for finances, bookings, and maintenance activity
+- `Golden Bears Player Portal`: a player, parent, coach, and admin portal for the NC Golden Bears youth travel hockey program
 
 ## Platform Shape
 
@@ -31,8 +32,11 @@ The starter app lives here:
 
 - [`apps/condo-ops-web/README.md`](C:\Projects\AWS\aws-app-platform\apps\condo-ops-web\README.md)
 - [`services/condo-ops-api/src/index.ts`](C:\Projects\AWS\aws-app-platform\services\condo-ops-api\src\index.ts)
+- [`apps/golden-bears-player-portal-web/README.md`](C:\Projects\AWS\aws-app-platform\apps\golden-bears-player-portal-web\README.md)
+- [`services/golden-bears-player-portal-api/src/index.ts`](C:\Projects\AWS\aws-app-platform\services\golden-bears-player-portal-api\src\index.ts)
 - [`infra/lib/shared-identity-stack.ts`](C:\Projects\AWS\aws-app-platform\infra\lib\shared-identity-stack.ts)
 - [`infra/lib/condo-ops-stack.ts`](C:\Projects\AWS\aws-app-platform\infra\lib\condo-ops-stack.ts)
+- [`infra/lib/golden-bears-player-portal-stack.ts`](C:\Projects\AWS\aws-app-platform\infra\lib\golden-bears-player-portal-stack.ts)
 
 Local development starts in demo mode. The deployed stack writes a `runtime-config.json` file so the same static frontend can switch into live AWS mode without a rebuild tied to one machine.
 
@@ -40,6 +44,7 @@ Local development starts in demo mode. The deployed stack writes a `runtime-conf
 
 - `npm install`
 - `npm run dev:web`
+- `npm run dev:golden-bears:web`
 - `npm run lint`
 - `npm run build`
 - `npm run infra:synth`
@@ -52,6 +57,7 @@ Local development starts in demo mode. The deployed stack writes a `runtime-conf
 - [`docs/cost-model.md`](C:\Projects\AWS\aws-app-platform\docs\cost-model.md)
 - [`docs/operating-model.md`](C:\Projects\AWS\aws-app-platform\docs\operating-model.md)
 - [`docs/account-setup.md`](C:\Projects\AWS\aws-app-platform\docs\account-setup.md)
+- [`docs/golden-bears-player-portal.md`](C:\Projects\AWS\aws-app-platform\docs\golden-bears-player-portal.md)
 - [`infra/README.md`](C:\Projects\AWS\aws-app-platform\infra\README.md)
 - [`templates/github-oidc-trust-policy.json`](C:\Projects\AWS\aws-app-platform\templates\github-oidc-trust-policy.json)
 - [`templates/github-deploy-policy.json`](C:\Projects\AWS\aws-app-platform\templates\github-deploy-policy.json)
@@ -71,4 +77,3 @@ What it does not have yet:
 - GitHub auth on this machine
 - AWS credentials configured locally
 - a live deployment into your AWS account
-

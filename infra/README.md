@@ -1,9 +1,10 @@
 # Infrastructure
 
-The current CDK app already synthesizes two stacks for each environment:
+The current CDK app synthesizes three stacks for each environment:
 
 - `PlatformIdentity-<env>`
 - `CondoOps-<env>`
+- `GoldenBearsPlayerPortal-<env>`
 
 Current responsibilities:
 
