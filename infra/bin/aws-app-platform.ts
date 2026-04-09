@@ -2,6 +2,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { platformEnvironments } from '../config/environments.js';
 import { CondoOpsStack } from '../lib/condo-ops-stack.js';
+import { GoldenBearsPlayerPortalStack } from '../lib/golden-bears-player-portal-stack.js';
 import { SharedIdentityStack } from '../lib/shared-identity-stack.js';
 
 const app = new cdk.App();
@@ -29,6 +30,12 @@ const sharedIdentityStack = new SharedIdentityStack(
 );
 
 new CondoOpsStack(app, `CondoOps-${environmentName}`, {
+  env,
+  environmentConfig,
+  sharedIdentity: sharedIdentityStack,
+});
+
+new GoldenBearsPlayerPortalStack(app, `GoldenBearsPlayerPortal-${environmentName}`, {
   env,
   environmentConfig,
   sharedIdentity: sharedIdentityStack,

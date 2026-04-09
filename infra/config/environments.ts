@@ -3,7 +3,10 @@ export type EnvironmentName = 'dev' | 'stage' | 'prod';
 export type EnvironmentConfig = {
   name: EnvironmentName;
   region: string;
-  plannedWebDomain: string;
+  plannedWebDomains: {
+    condoOps: string;
+    goldenBearsPlayerPortal: string;
+  };
   bootstrapAdminEmail: string;
   allowAuthenticatedReads: boolean;
 };
@@ -14,23 +17,31 @@ export const platformEnvironments: Record<EnvironmentName, EnvironmentConfig> = 
   dev: {
     name: 'dev',
     region: 'us-east-1',
-    plannedWebDomain: 'dev-condo.wasikowski.com',
+    plannedWebDomains: {
+      condoOps: 'dev-condo.wasikowski.com',
+      goldenBearsPlayerPortal: 'dev-goldenbears.wasikowski.com',
+    },
     bootstrapAdminEmail: defaultBootstrapAdminEmail,
     allowAuthenticatedReads: true,
   },
   stage: {
     name: 'stage',
     region: 'us-east-1',
-    plannedWebDomain: 'stage-condo.wasikowski.com',
+    plannedWebDomains: {
+      condoOps: 'stage-condo.wasikowski.com',
+      goldenBearsPlayerPortal: 'stage-goldenbears.wasikowski.com',
+    },
     bootstrapAdminEmail: defaultBootstrapAdminEmail,
     allowAuthenticatedReads: true,
   },
   prod: {
     name: 'prod',
     region: 'us-east-1',
-    plannedWebDomain: 'condo.wasikowski.com',
+    plannedWebDomains: {
+      condoOps: 'condo.wasikowski.com',
+      goldenBearsPlayerPortal: 'portal.ncgoldenbears.com',
+    },
     bootstrapAdminEmail: defaultBootstrapAdminEmail,
     allowAuthenticatedReads: false,
   },
 };
-

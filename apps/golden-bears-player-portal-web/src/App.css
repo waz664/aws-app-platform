@@ -1,0 +1,663 @@
+.app-shell {
+  min-height: 100vh;
+  padding: 1.4rem;
+}
+
+.loading-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.topbar,
+.card,
+.summary-card,
+.loading-card {
+  border: 1px solid rgba(24, 77, 59, 0.12);
+  border-radius: 1.7rem;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 44px rgba(18, 35, 27, 0.08);
+}
+
+.loading-card {
+  width: min(36rem, 100%);
+  padding: 2rem;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.2rem;
+  align-items: flex-start;
+  padding: 1.4rem;
+  background:
+    radial-gradient(circle at top right, rgba(184, 149, 47, 0.18), transparent 26%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 247, 0.96));
+}
+
+.brand-block {
+  display: flex;
+  gap: 1.15rem;
+  align-items: center;
+  max-width: 54rem;
+}
+
+.brand-mark {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 7.25rem;
+  height: 7.25rem;
+  border-radius: 2rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 249, 245, 0.98));
+  border: 1px solid rgba(24, 77, 59, 0.1);
+  padding: 0.7rem;
+}
+
+.brand-mark img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.brand-copy h1,
+.card h2,
+.card h3,
+.loading-card h1 {
+  margin: 0;
+  font-family: 'Sora', sans-serif;
+  letter-spacing: -0.04em;
+  color: #173428;
+}
+
+.brand-copy h1 {
+  font-size: clamp(2rem, 3vw, 2.6rem);
+}
+
+.brand-copy p,
+.section-copy,
+.helper-copy,
+.stack-card p,
+.loading-card p {
+  margin: 0;
+  color: #5b6d64;
+  line-height: 1.7;
+}
+
+.eyebrow,
+.section-eyebrow {
+  margin: 0 0 0.45rem;
+  color: #2f5a48;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.brand-meta,
+.topbar-actions,
+.action-row,
+.invite-form,
+.stack-card-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.brand-meta {
+  margin-top: 1rem;
+}
+
+.topbar-actions {
+  justify-content: flex-end;
+}
+
+.workspace-badge {
+  min-width: 11rem;
+  padding: 0.95rem 1rem;
+  border-radius: 1.2rem;
+  border: 1px solid rgba(24, 77, 59, 0.1);
+  background: rgba(247, 250, 247, 0.9);
+  text-align: left;
+}
+
+.workspace-badge__label {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: #6a7c73;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.workspace-badge strong {
+  color: #173428;
+  font-size: 1rem;
+}
+
+.account-menu {
+  position: relative;
+}
+
+.account-trigger,
+.primary-button,
+.secondary-button,
+.ghost-button,
+.link-button,
+.role-card,
+.player-list-item,
+.menu-role-button {
+  font: inherit;
+}
+
+.account-trigger,
+.primary-button,
+.secondary-button,
+.ghost-button,
+.link-button {
+  min-height: 2.85rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  padding: 0 1rem;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.account-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-height: 3.3rem;
+  padding: 0.4rem 0.55rem 0.4rem 0.5rem;
+  border-color: rgba(24, 77, 59, 0.14);
+  background: #ffffff;
+  color: #173428;
+}
+
+.account-trigger:hover,
+.primary-button:hover,
+.secondary-button:hover,
+.ghost-button:hover,
+.link-button:hover,
+.role-card:hover,
+.player-list-item:hover,
+.menu-role-button:hover {
+  transform: translateY(-1px);
+}
+
+.account-avatar {
+  display: grid;
+  place-items: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #d0b45b 0%, #b8952f 100%);
+  color: #13231c;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.account-trigger__text {
+  display: grid;
+  text-align: left;
+  line-height: 1.2;
+}
+
+.account-trigger__text strong {
+  color: #173428;
+}
+
+.account-trigger__text span {
+  color: #5b6d64;
+  font-size: 0.86rem;
+}
+
+.account-popover {
+  position: absolute;
+  top: calc(100% + 0.65rem);
+  right: 0;
+  z-index: 5;
+  width: min(22rem, calc(100vw - 2rem));
+  padding: 0.9rem;
+  border-radius: 1.35rem;
+  border: 1px solid rgba(24, 77, 59, 0.12);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 22px 60px rgba(12, 28, 22, 0.18);
+}
+
+.account-popover__section + .account-popover__section {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid rgba(24, 77, 59, 0.09);
+}
+
+.menu-role-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.menu-role-button {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: center;
+  width: 100%;
+  border: 1px solid rgba(24, 77, 59, 0.1);
+  border-radius: 1rem;
+  padding: 0.85rem 0.95rem;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfa 100%);
+  color: #173428;
+  cursor: pointer;
+  text-align: left;
+}
+
+.menu-role-button strong {
+  color: #2f5a48;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.menu-role-button--active {
+  border-color: rgba(184, 149, 47, 0.48);
+  background: linear-gradient(180deg, #fffaf0 0%, #fff4d6 100%);
+}
+
+.account-action-button {
+  width: 100%;
+  justify-content: center;
+}
+
+.primary-button {
+  background: linear-gradient(180deg, #d0b45b 0%, #b8952f 100%);
+  color: #13231c;
+}
+
+.secondary-button {
+  background: #ffffff;
+  border-color: rgba(24, 77, 59, 0.14);
+  color: #173428;
+}
+
+.ghost-button {
+  background: transparent;
+  border-color: rgba(24, 77, 59, 0.14);
+  color: #173428;
+}
+
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  background: rgba(24, 77, 59, 0.08);
+  color: #214635;
+}
+
+.app-content {
+  margin-top: 1rem;
+}
+
+.summary-strip,
+.workspace-grid,
+.field-grid,
+.role-grid,
+.option-grid,
+.measure-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.summary-strip {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 1rem;
+}
+
+.summary-card {
+  padding: 1rem 1.05rem;
+}
+
+.summary-card span {
+  display: block;
+  color: #71837b;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.summary-card strong {
+  display: block;
+  margin-top: 0.35rem;
+  color: #173428;
+  font-size: 1.25rem;
+}
+
+.feedback-banner {
+  margin-top: 1rem;
+  border-radius: 1rem;
+  padding: 0.95rem 1rem;
+}
+
+.feedback-banner--error {
+  border: 1px solid rgba(184, 74, 41, 0.18);
+  background: rgba(253, 232, 221, 0.9);
+  color: #8e3917;
+}
+
+.feedback-banner--success {
+  border: 1px solid rgba(51, 139, 99, 0.18);
+  background: rgba(227, 246, 236, 0.9);
+  color: #215c3a;
+}
+
+.workspace-grid {
+  grid-template-columns: minmax(0, 1.75fr) minmax(18rem, 0.95fr);
+  align-items: start;
+}
+
+.workspace-main,
+.workspace-sidebar {
+  display: grid;
+  gap: 1rem;
+}
+
+.card {
+  padding: 1.25rem;
+}
+
+.card--highlight {
+  margin-top: 1rem;
+  background:
+    radial-gradient(circle at top right, rgba(184, 149, 47, 0.16), transparent 30%),
+    linear-gradient(180deg, rgba(255, 252, 242, 0.98), rgba(255, 247, 224, 0.98));
+  border-color: rgba(184, 149, 47, 0.26);
+}
+
+.card-header,
+.sidebar-header,
+.stack-card,
+.player-list-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  border-radius: 999px;
+  padding: 0 0.85rem;
+  background: rgba(24, 77, 59, 0.08);
+  color: #214635;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.form-section {
+  margin-top: 1.3rem;
+}
+
+.form-section h3 {
+  margin: 0 0 0.9rem;
+  font-family: 'Sora', sans-serif;
+  letter-spacing: -0.02em;
+  color: #173428;
+}
+
+.field-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.measure-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.field {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.checkbox-field {
+  display: flex;
+  gap: 0.8rem;
+  align-items: flex-start;
+  margin-top: 1rem;
+  border: 1px solid rgba(24, 77, 59, 0.1);
+  border-radius: 1rem;
+  padding: 0.95rem 1rem;
+  background: #f8fbf8;
+}
+
+.checkbox-field input {
+  margin-top: 0.2rem;
+}
+
+.checkbox-field strong {
+  color: #173428;
+}
+
+.field span,
+.question-label {
+  font-weight: 700;
+  color: #223e31;
+}
+
+.question {
+  margin-top: 1.45rem;
+}
+
+.question-label {
+  margin-bottom: 0.85rem;
+  line-height: 1.5;
+}
+
+.field input,
+.field select,
+.field textarea,
+.invite-form input {
+  width: 100%;
+  border: 1px solid rgba(24, 77, 59, 0.16);
+  border-radius: 1rem;
+  padding: 0.85rem 0.95rem;
+  background: #fbfcfa;
+  color: #173428;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus,
+.invite-form input:focus {
+  outline: none;
+  border-color: rgba(24, 77, 59, 0.36);
+  box-shadow: 0 0 0 4px rgba(24, 77, 59, 0.08);
+  background: #ffffff;
+}
+
+.field textarea {
+  min-height: 8rem;
+  resize: vertical;
+}
+
+.field input[type='color'] {
+  min-height: 3.25rem;
+  padding: 0.3rem;
+}
+
+.option-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.option {
+  position: relative;
+}
+
+.option input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.option label,
+.role-card,
+.player-list-item {
+  display: block;
+  width: 100%;
+  border: 1px solid rgba(24, 77, 59, 0.12);
+  border-radius: 1.2rem;
+  padding: 1rem;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfa 100%);
+  cursor: pointer;
+  text-align: left;
+}
+
+.option label {
+  height: 100%;
+}
+
+.option input:checked + label,
+.option-card--selected,
+.player-list-item--active,
+.stack-card--highlight {
+  border-color: rgba(184, 149, 47, 0.5);
+  background: linear-gradient(180deg, #fffaf0 0%, #fff4d6 100%);
+}
+
+.option-title,
+.role-card strong,
+.player-list-item strong,
+.stack-card strong {
+  display: block;
+  color: #173428;
+}
+
+.option-desc,
+.role-card span,
+.player-list-item span {
+  display: block;
+  margin-top: 0.35rem;
+  color: #5b6d64;
+  line-height: 1.55;
+}
+
+.role-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stack-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.stack-card {
+  border: 1px solid rgba(24, 77, 59, 0.08);
+  border-radius: 1.1rem;
+  padding: 0.95rem 1rem;
+  background: #f8fbf8;
+}
+
+.invite-panel {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(24, 77, 59, 0.08);
+}
+
+.team-history-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.team-history-header h3 {
+  margin-bottom: 0.35rem;
+}
+
+.team-history-list {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+
+.team-history-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 0.9fr) minmax(0, 1.3fr) minmax(8rem, 1fr) auto;
+  gap: 0.85rem;
+  align-items: end;
+  padding: 1rem;
+  border: 1px solid rgba(24, 77, 59, 0.1);
+  border-radius: 1.1rem;
+  background: #f8fbf8;
+}
+
+.team-history-actions {
+  display: flex;
+  align-items: flex-end;
+  min-height: 100%;
+}
+
+.footer-note {
+  margin-top: 1.3rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid rgba(24, 77, 59, 0.08);
+}
+
+@media (max-width: 1100px) {
+  .summary-strip,
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    padding: 1rem;
+  }
+
+  .topbar,
+  .brand-block,
+  .topbar-actions,
+  .card-header,
+  .sidebar-header,
+  .stack-card,
+  .player-list-item {
+    flex-direction: column;
+  }
+
+  .brand-mark {
+    width: 6rem;
+    height: 6rem;
+  }
+
+  .account-popover {
+    left: 0;
+    right: auto;
+  }
+
+  .field-grid,
+  .role-grid,
+  .option-grid,
+  .measure-grid,
+  .team-history-row {
+    grid-template-columns: 1fr;
+  }
+
+  .checkbox-field,
+  .team-history-header {
+    flex-direction: column;
+  }
+}
