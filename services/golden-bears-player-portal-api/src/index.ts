@@ -13,8 +13,10 @@ import {
   QueryCommand,
   ScanCommand,
 } from '@aws-sdk/lib-dynamodb';
+import PDFDocument from 'pdfkit';
 
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+type ReportDocument = InstanceType<typeof PDFDocument>;
 
 const ORGANIZATION_ID = 'nc-golden-bears';
 const APP_KEY = process.env.APP_KEY ?? 'golden-bears-player-portal';
@@ -121,6 +123,7 @@ type TryoutSession = {
   id: string;
   name: string;
   teamIds: string[];
+  evaluationTemplateId: string | null;
 };
 
 type TryoutPlayerAssignmentMode = 'default' | 'manual' | 'unassigned';
@@ -148,6 +151,34 @@ type TryoutSeasonItem = {
   updatedAt: string;
   createdByUserId: string;
   updatedByUserId: string;
+};
+
+type EvaluationScoreValue = 1 | 2 | 3 | 4 | 5;
+
+type EvaluationNote = {
+  id: string;
+  text: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type EvaluationRecordItem = {
+  pk: string;
+  sk: string;
+  entityType: 'PlayerEvaluation';
+  organizationId: string;
+  seasonId: string;
+  sessionId: string;
+  playerId: string;
+  evaluatorUserId: string;
+  evaluatorName: string;
+  templateId: string;
+  scores: Record<string, EvaluationScoreValue | null>;
+  notes: EvaluationNote[];
+  createdAt: string;
+  updatedAt: string;
+  gsi1pk: string;
+  gsi1sk: string;
 };
 
 type PlayerProfileInput = {
@@ -357,6 +388,11 @@ type TryoutSeasonUpdateInput = {
   playerOverrides?: TryoutPlayerOverride[];
 };
 
+type EvaluationRecordUpdateInput = {
+  scores?: Record<string, unknown>;
+  notes?: unknown;
+};
+
 type UserProfileUpdateInput = {
   primaryRole?: PrimaryRole | null;
   firstName?: string;
@@ -418,6 +454,67 @@ type SerializedTryoutPlayerSummary = {
   jerseyNumber: string;
 };
 
+type SerializedEvaluationNote = {
+  id: string;
+  text: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type SerializedPlayerEvaluationRecord = {
+  playerId: string;
+  seasonId: string;
+  sessionId: string;
+  evaluatorUserId: string;
+  evaluatorName: string;
+  templateId: string;
+  scores: Record<string, EvaluationScoreValue | null>;
+  notes: SerializedEvaluationNote[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+type SerializedEvaluationSessionPlayer = {
+  playerId: string;
+  firstName: string;
+  lastName: string;
+  displayName: string;
+  jerseyNumber: string;
+  groupId: string;
+  groupName: string;
+  teamId: string;
+  teamName: string;
+  birthYear: string;
+  lastTeamName: string;
+  position: string;
+  heightDisplay: string;
+  weightDisplay: string;
+  yearsPlaying: number | null;
+  completedBy: PlayerProfileInput['completedBy'];
+  intake: IntakeAnswers;
+};
+
+type SerializedEvaluationSessionTeam = {
+  id: string;
+  name: string;
+  groupId: string;
+  groupName: string;
+  players: SerializedEvaluationSessionPlayer[];
+};
+
+type SerializedEvaluationSessionContext = {
+  seasonId: string;
+  seasonName: string;
+  session: TryoutSession;
+  template: SerializedEvaluationTemplate;
+  teams: SerializedEvaluationSessionTeam[];
+  records: SerializedPlayerEvaluationRecord[];
+  evaluator: {
+    userId: string;
+    displayName: string;
+  };
+};
+
 type SerializedTryoutSeason = {
   id: string;
   name: string;
@@ -428,6 +525,39 @@ type SerializedTryoutSeason = {
   players: SerializedTryoutPlayerSummary[];
   createdAt: string;
   updatedAt: string;
+};
+
+type TryoutSeasonReportSession = {
+  session: TryoutSession;
+  template: EvaluationTemplateItem | null;
+  records: EvaluationRecordItem[];
+  teamNames: string[];
+};
+
+type TryoutSeasonReportPlayer = {
+  summary: SerializedTryoutPlayerSummary;
+  player: PlayerItem;
+  groupName: string;
+  teamName: string;
+  sessionEntries: TryoutSeasonReportSession[];
+};
+
+type TryoutSeasonReportSessionSummary = {
+  session: TryoutSession;
+  template: EvaluationTemplateItem | null;
+  rosterCount: number;
+  evaluatedPlayerCount: number;
+  evaluationCount: number;
+  evaluatorCount: number;
+  teamNames: string[];
+};
+
+type TryoutSeasonReportData = {
+  organization: OrganizationOverview;
+  season: SerializedTryoutSeason;
+  players: TryoutSeasonReportPlayer[];
+  sessionSummaries: TryoutSeasonReportSessionSummary[];
+  totalEvaluationCount: number;
 };
 
 type BootstrapResponse = {
@@ -551,6 +681,40 @@ export async function handler(
         await deleteTryoutSeasonResponse(
           userId,
           decodeURIComponent(path.split('/')[2]),
+        ),
+      );
+    }
+    if (method === 'GET' && /^\/tryout-seasons\/[^/]+\/report$/.test(path)) {
+      return await getTryoutSeasonReportResponse(
+        userId,
+        decodeURIComponent(path.split('/')[2]),
+      );
+    }
+    if (
+      method === 'GET' &&
+      /^\/tryout-seasons\/[^/]+\/sessions\/[^/]+\/evaluation$/.test(path)
+    ) {
+      return json(
+        200,
+        await getEvaluationSessionContextResponse(
+          userId,
+          decodeURIComponent(path.split('/')[2]),
+          decodeURIComponent(path.split('/')[4]),
+        ),
+      );
+    }
+    if (
+      method === 'PUT' &&
+      /^\/tryout-seasons\/[^/]+\/sessions\/[^/]+\/players\/[^/]+\/evaluation$/.test(path)
+    ) {
+      return json(
+        200,
+        await updatePlayerEvaluationRecordResponse(
+          userId,
+          decodeURIComponent(path.split('/')[2]),
+          decodeURIComponent(path.split('/')[4]),
+          decodeURIComponent(path.split('/')[6]),
+          event.body,
         ),
       );
     }
@@ -894,6 +1058,24 @@ async function deleteEvaluationTemplateResponse(
   await assertCanManageOrganization(userId);
   const existingTemplate = await getEvaluationTemplateItem(templateId);
   if (!existingTemplate) throw notFound('Evaluation template not found.');
+  const tryoutSeasons = await listTryoutSeasonItems();
+  const linkedSession = tryoutSeasons
+    .flatMap((season) =>
+      sanitizeTryoutSessions(
+        season.sessions,
+        sanitizeTryoutTeams(season.teams, sanitizeTryoutGroups(season.groups)),
+      ).map((session) => ({
+        seasonName: season.name,
+        sessionName: session.name,
+        evaluationTemplateId: session.evaluationTemplateId,
+      })),
+    )
+    .find((session) => session.evaluationTemplateId === templateId);
+  if (linkedSession) {
+    throw conflict(
+      `This template is currently assigned to ${linkedSession.sessionName} in ${linkedSession.seasonName}. Remove it from that session before deleting the template.`,
+    );
+  }
 
   await dynamo.send(
     new DeleteCommand({
@@ -966,6 +1148,7 @@ async function updateTryoutSeasonResponse(
     sanitizedTeams,
     existingSeason.sessions,
   );
+  await assertTryoutSessionTemplatesExist(sanitizedSessions);
   const players = await scanAll<PlayerItem>('Player');
   const playerIdSet = new Set(
     players.map((player) => player.playerId),
@@ -1000,18 +1183,352 @@ async function deleteTryoutSeasonResponse(
   await assertCanManageTryouts(userId);
   const existingSeason = await getTryoutSeasonItem(seasonId);
   if (!existingSeason) throw notFound('Tryout season not found.');
-
-  await dynamo.send(
-    new DeleteCommand({
-      TableName: APP_DATA_TABLE_NAME,
-      Key: {
-        pk: organizationKey(ORGANIZATION_ID),
-        sk: tryoutSeasonKey(seasonId),
-      },
-    }),
+  const linkedEvaluations = (await scanAll<EvaluationRecordItem>('PlayerEvaluation')).filter(
+    (record) => record.seasonId === seasonId,
   );
 
+  await Promise.all([
+    dynamo.send(
+      new DeleteCommand({
+        TableName: APP_DATA_TABLE_NAME,
+        Key: {
+          pk: organizationKey(ORGANIZATION_ID),
+          sk: tryoutSeasonKey(seasonId),
+        },
+      }),
+    ),
+    ...linkedEvaluations.map((record) =>
+      dynamo.send(
+        new DeleteCommand({
+          TableName: APP_DATA_TABLE_NAME,
+          Key: {
+            pk: record.pk,
+            sk: record.sk,
+          },
+        }),
+      ),
+    ),
+  ]);
+
   return { deletedSeasonId: seasonId };
+}
+
+async function getTryoutSeasonReportResponse(
+  userId: string,
+  seasonId: string,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  await assertCanManageTryouts(userId);
+  const report = await buildTryoutSeasonReportData(seasonId);
+  const pdfBuffer = await buildTryoutSeasonReportPdf(report);
+  return pdf(
+    200,
+    pdfBuffer,
+    `${buildReportFileName(report.season.name) || 'tryout-season'}-report.pdf`,
+  );
+}
+
+async function buildTryoutSeasonReportData(
+  seasonId: string,
+): Promise<TryoutSeasonReportData> {
+  const [organization, season, players] = await Promise.all([
+    getOrganizationOverview(),
+    getTryoutSeasonItem(seasonId),
+    scanAll<PlayerItem>('Player'),
+  ]);
+
+  if (!season) throw notFound('Tryout season not found.');
+
+  const seasonPlayers = players.filter(
+    (player) => player.organizationId === ORGANIZATION_ID,
+  );
+  const serializedSeason = serializeTryoutSeason(season, seasonPlayers);
+  const teamMap = new Map(serializedSeason.teams.map((team) => [team.id, team]));
+  const groupMap = new Map(serializedSeason.groups.map((group) => [group.id, group]));
+  const playerMap = new Map(seasonPlayers.map((player) => [player.playerId, player]));
+
+  const sessionRecordEntries = await Promise.all(
+    serializedSeason.sessions.map(async (session) => [
+      session.id,
+      await listEvaluationRecordsForSession(serializedSeason.id, session.id),
+    ] as const),
+  );
+  const sessionRecordsMap = new Map(sessionRecordEntries);
+  const templateIds = [
+    ...new Set(
+      serializedSeason.sessions
+        .map((session) => session.evaluationTemplateId)
+        .filter((templateId): templateId is string => Boolean(templateId)),
+    ),
+  ];
+  const templates = await Promise.all(
+    templateIds.map((templateId) => getEvaluationTemplateItem(templateId)),
+  );
+  const templateMap = new Map(
+    templates
+      .filter((template): template is EvaluationTemplateItem => Boolean(template))
+      .map((template) => [template.templateId, template]),
+  );
+
+  const reportPlayers = serializedSeason.players
+    .map((summary) => {
+      const player = playerMap.get(summary.playerId);
+      if (!player) throw notFound('Player data for the tryout report was unavailable.');
+
+      const groupName = summary.effectiveGroupId
+        ? groupMap.get(summary.effectiveGroupId)?.name ?? 'Unknown group'
+        : 'Unassigned Pool';
+      const teamName = summary.teamId
+        ? teamMap.get(summary.teamId)?.name ?? 'Unknown team'
+        : 'Unassigned';
+      const sessionEntries = serializedSeason.sessions
+        .map((session) => {
+          const records =
+            (sessionRecordsMap.get(session.id) ?? []).filter(
+              (record) => record.playerId === summary.playerId,
+            );
+          const isRosteredForSession =
+            summary.teamId !== null && session.teamIds.includes(summary.teamId);
+          if (!isRosteredForSession && records.length === 0) return null;
+
+          return {
+            session,
+            template: session.evaluationTemplateId
+              ? templateMap.get(session.evaluationTemplateId) ?? null
+              : null,
+            records: [...records].sort((left, right) => {
+              const evaluatorComparison = left.evaluatorName.localeCompare(right.evaluatorName);
+              if (evaluatorComparison !== 0) return evaluatorComparison;
+              return left.updatedAt.localeCompare(right.updatedAt);
+            }),
+            teamNames: session.teamIds.map(
+              (teamId) => teamMap.get(teamId)?.name ?? 'Unknown team',
+            ),
+          } satisfies TryoutSeasonReportSession;
+        })
+        .filter((entry): entry is TryoutSeasonReportSession => Boolean(entry));
+
+      return {
+        summary,
+        player,
+        groupName,
+        teamName,
+        sessionEntries,
+      } satisfies TryoutSeasonReportPlayer;
+    })
+    .sort((left, right) => {
+      const groupComparison = left.groupName.localeCompare(right.groupName);
+      if (groupComparison !== 0) return groupComparison;
+      const teamComparison = left.teamName.localeCompare(right.teamName);
+      if (teamComparison !== 0) return teamComparison;
+      return left.summary.displayName.localeCompare(right.summary.displayName);
+    });
+
+  const sessionSummaries = serializedSeason.sessions.map((session) => {
+    const records = sessionRecordsMap.get(session.id) ?? [];
+    const rosterPlayerIds = new Set(
+      serializedSeason.players
+        .filter((player) => player.teamId && session.teamIds.includes(player.teamId))
+        .map((player) => player.playerId),
+    );
+
+    return {
+      session,
+      template: session.evaluationTemplateId
+        ? templateMap.get(session.evaluationTemplateId) ?? null
+        : null,
+      rosterCount: rosterPlayerIds.size,
+      evaluatedPlayerCount: new Set(records.map((record) => record.playerId)).size,
+      evaluationCount: records.length,
+      evaluatorCount: new Set(records.map((record) => record.evaluatorUserId)).size,
+      teamNames: session.teamIds.map(
+        (teamId) => teamMap.get(teamId)?.name ?? 'Unknown team',
+      ),
+    } satisfies TryoutSeasonReportSessionSummary;
+  });
+
+  return {
+    organization,
+    season: serializedSeason,
+    players: reportPlayers,
+    sessionSummaries,
+    totalEvaluationCount: sessionSummaries.reduce(
+      (total, sessionSummary) => total + sessionSummary.evaluationCount,
+      0,
+    ),
+  };
+}
+
+async function getEvaluationSessionContextResponse(
+  userId: string,
+  seasonId: string,
+  sessionId: string,
+): Promise<SerializedEvaluationSessionContext> {
+  await assertCanManageTryouts(userId);
+  const [season, players, evaluatorProfile] = await Promise.all([
+    getTryoutSeasonItem(seasonId),
+    scanAll<PlayerItem>('Player'),
+    requireUserProfile(userId),
+  ]);
+
+  if (!season) throw notFound('Tryout season not found.');
+  const session = sanitizeTryoutSessions(season.sessions, season.teams).find(
+    (entry) => entry.id === sessionId,
+  );
+  if (!session) throw notFound('Evaluation session not found.');
+  if (!session.evaluationTemplateId) {
+    throw badRequest('Assign an evaluation template to this session before starting evaluation.');
+  }
+
+  const groups = sanitizeTryoutGroups(season.groups);
+  const teams = sanitizeTryoutTeams(season.teams, groups);
+  const template = await getEvaluationTemplateItem(session.evaluationTemplateId);
+  if (!template) {
+    throw badRequest('The session references an evaluation template that no longer exists.');
+  }
+
+  const seasonPlayers = players.filter(
+    (player) => player.organizationId === ORGANIZATION_ID,
+  );
+  const playerSummaries = serializeTryoutSeason(season, seasonPlayers).players;
+  const playerSummaryMap = new Map(playerSummaries.map((player) => [player.playerId, player]));
+  const playerMap = new Map(seasonPlayers.map((player) => [player.playerId, player]));
+  const sessionTeamIds = new Set(session.teamIds);
+
+  const serializedTeams = teams
+    .filter((team) => sessionTeamIds.has(team.id))
+    .map((team) => ({
+      id: team.id,
+      name: team.name,
+      groupId: team.groupId,
+      groupName: getTryoutGroupName(team.groupId, groups),
+      players: playerSummaries
+        .filter((summary) => summary.teamId === team.id)
+        .map((summary) => {
+          const player = playerMap.get(summary.playerId);
+          if (!player) throw notFound('Player data for evaluation session was unavailable.');
+          return serializeEvaluationSessionPlayer(summary, player, team, groups);
+        })
+        .sort(compareEvaluationPlayers),
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  const currentEvaluatorRecords = await listEvaluationRecordsForEvaluator(
+    seasonId,
+    sessionId,
+    userId,
+  );
+
+  const filteredRecords = currentEvaluatorRecords
+    .filter((record) => {
+      const summary = playerSummaryMap.get(record.playerId);
+      return Boolean(summary?.teamId && sessionTeamIds.has(summary.teamId));
+    })
+    .map(serializeEvaluationRecord);
+
+  return {
+    seasonId,
+    seasonName: season.name,
+    session,
+    template: serializeEvaluationTemplate(template),
+    teams: serializedTeams,
+    records: filteredRecords,
+    evaluator: {
+      userId,
+      displayName: buildUserName(evaluatorProfile.firstName, evaluatorProfile.lastName) || evaluatorProfile.email,
+    },
+  };
+}
+
+async function updatePlayerEvaluationRecordResponse(
+  userId: string,
+  seasonId: string,
+  sessionId: string,
+  playerId: string,
+  body: string | undefined,
+): Promise<{ record: SerializedPlayerEvaluationRecord | null }> {
+  await assertCanManageTryouts(userId);
+  const payload = parseJsonBody<EvaluationRecordUpdateInput>(body);
+  const [season, player, evaluatorProfile] = await Promise.all([
+    getTryoutSeasonItem(seasonId),
+    getPlayer(playerId),
+    requireUserProfile(userId),
+  ]);
+
+  if (!season) throw notFound('Tryout season not found.');
+  if (!player || player.organizationId !== ORGANIZATION_ID) {
+    throw notFound('Player not found.');
+  }
+
+  const groups = sanitizeTryoutGroups(season.groups);
+  const teams = sanitizeTryoutTeams(season.teams, groups);
+  const session = sanitizeTryoutSessions(season.sessions, teams).find(
+    (entry) => entry.id === sessionId,
+  );
+  if (!session) throw notFound('Evaluation session not found.');
+  if (!session.evaluationTemplateId) {
+    throw badRequest('Assign an evaluation template to this session before recording evaluations.');
+  }
+
+  const template = await getEvaluationTemplateItem(session.evaluationTemplateId);
+  if (!template) {
+    throw badRequest('The assigned evaluation template no longer exists.');
+  }
+
+  const playerSummary = serializeTryoutPlayerSummary(
+    player,
+    groups,
+    new Map(teams.map((team) => [team.id, team])),
+    season.playerOverrides.find((override) => override.playerId === playerId),
+  );
+
+  if (!playerSummary.teamId || !session.teamIds.includes(playerSummary.teamId)) {
+    throw badRequest('This player is not assigned to a team in the selected evaluation session.');
+  }
+
+  const existingRecord = await getEvaluationRecord(seasonId, sessionId, userId, playerId);
+  const scores = sanitizeEvaluationScores(
+    payload.scores,
+    template.criteria,
+    existingRecord?.scores,
+  );
+  const notes = sanitizeEvaluationNotes(
+    payload.notes,
+    existingRecord?.notes,
+  );
+
+  if (Object.values(scores).every((score) => score === null) && notes.length === 0) {
+    if (existingRecord) {
+      await deleteEvaluationRecord(seasonId, sessionId, userId, playerId);
+    }
+    return { record: null };
+  }
+
+  const now = new Date().toISOString();
+  const nextRecord: EvaluationRecordItem = {
+    pk: evaluationRecordPartitionKey(seasonId, sessionId, userId),
+    sk: evaluationRecordSortKey(playerId),
+    entityType: 'PlayerEvaluation',
+    organizationId: ORGANIZATION_ID,
+    seasonId,
+    sessionId,
+    playerId,
+    evaluatorUserId: userId,
+    evaluatorName:
+      buildUserName(evaluatorProfile.firstName, evaluatorProfile.lastName) ||
+      evaluatorProfile.email,
+    templateId: template.templateId,
+    scores,
+    notes,
+    createdAt: existingRecord?.createdAt ?? now,
+    updatedAt: now,
+    gsi1pk: evaluationSessionKey(seasonId, sessionId),
+    gsi1sk: `EVALUATOR#${userId}#PLAYER#${playerId}`,
+  };
+
+  await saveEvaluationRecord(nextRecord);
+  return {
+    record: serializeEvaluationRecord(nextRecord),
+  };
 }
 
 async function createPlayerResponse(userId: string, email: string, body: string | undefined): Promise<{ bootstrap: BootstrapResponse; player: SerializedPlayer }> {
@@ -1467,6 +1984,27 @@ async function getEvaluationTemplateItem(
   return (response.Item as EvaluationTemplateItem | undefined) ?? null;
 }
 
+async function assertTryoutSessionTemplatesExist(
+  sessions: TryoutSession[],
+): Promise<void> {
+  const templateIds = [...new Set(
+    sessions
+      .map((session) => session.evaluationTemplateId)
+      .filter((templateId): templateId is string => Boolean(templateId)),
+  )];
+
+  if (templateIds.length === 0) return;
+
+  const templates = await Promise.all(
+    templateIds.map((templateId) => getEvaluationTemplateItem(templateId)),
+  );
+
+  const missingTemplateId = templateIds.find((templateId, index) => !templates[index]);
+  if (missingTemplateId) {
+    throw badRequest(`Evaluation template "${missingTemplateId}" was not found.`);
+  }
+}
+
 async function saveEvaluationTemplateItem(
   item: EvaluationTemplateItem,
 ): Promise<void> {
@@ -1517,6 +2055,98 @@ async function saveTryoutSeasonItem(
     new PutCommand({
       TableName: APP_DATA_TABLE_NAME,
       Item: item,
+    }),
+  );
+}
+
+async function listEvaluationRecordsForEvaluator(
+  seasonId: string,
+  sessionId: string,
+  evaluatorUserId: string,
+): Promise<EvaluationRecordItem[]> {
+  const response = await dynamo.send(
+    new QueryCommand({
+      TableName: APP_DATA_TABLE_NAME,
+      KeyConditionExpression: 'pk = :pk and begins_with(sk, :sk)',
+      ExpressionAttributeValues: {
+        ':pk': evaluationRecordPartitionKey(seasonId, sessionId, evaluatorUserId),
+        ':sk': 'PLAYER#',
+      },
+    }),
+  );
+
+  return (response.Items as EvaluationRecordItem[] | undefined) ?? [];
+}
+
+async function listEvaluationRecordsForSession(
+  seasonId: string,
+  sessionId: string,
+): Promise<EvaluationRecordItem[]> {
+  const items: EvaluationRecordItem[] = [];
+  let exclusiveStartKey: Record<string, unknown> | undefined;
+
+  do {
+    const response = await dynamo.send(
+      new QueryCommand({
+        TableName: APP_DATA_TABLE_NAME,
+        IndexName: 'gsi1',
+        KeyConditionExpression: 'gsi1pk = :pk and begins_with(gsi1sk, :sk)',
+        ExpressionAttributeValues: {
+          ':pk': evaluationSessionKey(seasonId, sessionId),
+          ':sk': 'EVALUATOR#',
+        },
+        ExclusiveStartKey: exclusiveStartKey,
+      }),
+    );
+
+    items.push(...(((response.Items as EvaluationRecordItem[] | undefined) ?? [])));
+    exclusiveStartKey = response.LastEvaluatedKey as Record<string, unknown> | undefined;
+  } while (exclusiveStartKey);
+
+  return items;
+}
+
+async function getEvaluationRecord(
+  seasonId: string,
+  sessionId: string,
+  evaluatorUserId: string,
+  playerId: string,
+): Promise<EvaluationRecordItem | null> {
+  const response = await dynamo.send(
+    new GetCommand({
+      TableName: APP_DATA_TABLE_NAME,
+      Key: {
+        pk: evaluationRecordPartitionKey(seasonId, sessionId, evaluatorUserId),
+        sk: evaluationRecordSortKey(playerId),
+      },
+    }),
+  );
+
+  return (response.Item as EvaluationRecordItem | undefined) ?? null;
+}
+
+async function saveEvaluationRecord(item: EvaluationRecordItem): Promise<void> {
+  await dynamo.send(
+    new PutCommand({
+      TableName: APP_DATA_TABLE_NAME,
+      Item: item,
+    }),
+  );
+}
+
+async function deleteEvaluationRecord(
+  seasonId: string,
+  sessionId: string,
+  evaluatorUserId: string,
+  playerId: string,
+): Promise<void> {
+  await dynamo.send(
+    new DeleteCommand({
+      TableName: APP_DATA_TABLE_NAME,
+      Key: {
+        pk: evaluationRecordPartitionKey(seasonId, sessionId, evaluatorUserId),
+        sk: evaluationRecordSortKey(playerId),
+      },
     }),
   );
 }
@@ -1777,7 +2407,9 @@ async function saveInvite(invite: InviteItem): Promise<void> {
   await dynamo.send(new PutCommand({ TableName: APP_DATA_TABLE_NAME, Item: invite }));
 }
 
-async function scanAll<T>(entityType: 'Player' | 'Invite' | 'UserProfile'): Promise<T[]> {
+async function scanAll<T>(
+  entityType: 'Player' | 'Invite' | 'UserProfile' | 'PlayerEvaluation',
+): Promise<T[]> {
   const items: T[] = [];
   let exclusiveStartKey: Record<string, unknown> | undefined;
 
@@ -2244,6 +2876,78 @@ function sanitizeEvaluationCriteria(
   return sanitizedCriteria;
 }
 
+function sanitizeEvaluationScores(
+  value: unknown,
+  criteria: EvaluationCriterion[],
+  fallback: Record<string, EvaluationScoreValue | null> = {},
+): Record<string, EvaluationScoreValue | null> {
+  const source = value === undefined ? fallback : asRecord(value);
+  const criterionIds = new Set(criteria.map((criterion) => criterion.id));
+  const scores: Record<string, EvaluationScoreValue | null> = {};
+
+  criteria.forEach((criterion) => {
+    const rawValue = source[criterion.id];
+    if (rawValue === null || rawValue === undefined || rawValue === '') {
+      scores[criterion.id] = null;
+      return;
+    }
+
+    const parsedValue = Number(rawValue);
+    if (!Number.isInteger(parsedValue) || parsedValue < 1 || parsedValue > 5) {
+      throw badRequest(`Evaluation score for "${criterion.title}" must be a whole number from 1 to 5.`);
+    }
+
+    scores[criterion.id] = parsedValue as EvaluationScoreValue;
+  });
+
+  Object.keys(source).forEach((criterionId) => {
+    if (!criterionIds.has(criterionId)) {
+      throw badRequest(`Unknown evaluation criterion "${criterionId}".`);
+    }
+  });
+
+  return scores;
+}
+
+function sanitizeEvaluationNotes(
+  value: unknown,
+  fallback: EvaluationNote[] = [],
+): EvaluationNote[] {
+  const source =
+    value === undefined ? fallback : Array.isArray(value) ? value : null;
+
+  if (!source) {
+    throw badRequest('Evaluation notes must be provided as a list.');
+  }
+
+  const existingNotes = new Map(fallback.map((note) => [note.id, note]));
+  const seenIds = new Set<string>();
+
+  return source
+    .map((note) => {
+      const record = asRecord(note);
+      const noteId = sanitizeIdentifier(record.id);
+      const text = sanitizeFreeText(record.text);
+      if (!text) return null;
+      if (seenIds.has(noteId)) {
+        throw badRequest('Evaluation notes must have unique ids.');
+      }
+      seenIds.add(noteId);
+
+      const existing = existingNotes.get(noteId);
+      return {
+        id: noteId,
+        text,
+        createdAt: existing?.createdAt ?? sanitizeTimestamp(record.createdAt),
+        updatedAt: existing && existing.text === text
+          ? existing.updatedAt
+          : new Date().toISOString(),
+      } satisfies EvaluationNote;
+    })
+    .filter((note): note is EvaluationNote => Boolean(note))
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
 function sanitizeTryoutGroups(
   groups: unknown,
   fallback: TryoutGroup[] = [],
@@ -2366,6 +3070,7 @@ function sanitizeTryoutSessions(
         `Tryout session ${index + 1} name`,
       ),
       teamIds,
+      evaluationTemplateId: sanitizeOptionalIdentifier(record.evaluationTemplateId),
     };
 
     if (seenIds.has(sanitizedSession.id)) {
@@ -2863,6 +3568,11 @@ function sanitizeIdentifier(value: unknown): string {
   return nextValue || randomUUID();
 }
 
+function sanitizeOptionalIdentifier(value: unknown): string | null {
+  const nextValue = sanitizeFreeText(value);
+  return nextValue || null;
+}
+
 function sanitizeTimestamp(value: unknown): string {
   const nextValue = sanitizeFreeText(value);
   return nextValue || new Date().toISOString();
@@ -2870,6 +3580,10 @@ function sanitizeTimestamp(value: unknown): string {
 
 function buildPlayerName(firstName: string, lastName: string): string {
   return `${firstName} ${lastName}`.trim();
+}
+
+function buildUserName(firstName: string | undefined, lastName: string | undefined): string {
+  return `${firstName ?? ''} ${lastName ?? ''}`.trim();
 }
 
 function parseSeasonStartYear(seasonLabel: string): number {
@@ -2934,6 +3648,53 @@ function serializeEvaluationTemplate(
     criteria: sanitizeEvaluationCriteria(template.criteria),
     createdAt: template.createdAt,
     updatedAt: template.updatedAt,
+  };
+}
+
+function serializeEvaluationRecord(
+  record: EvaluationRecordItem,
+): SerializedPlayerEvaluationRecord {
+  return {
+    playerId: record.playerId,
+    seasonId: record.seasonId,
+    sessionId: record.sessionId,
+    evaluatorUserId: record.evaluatorUserId,
+    evaluatorName: record.evaluatorName,
+    templateId: record.templateId,
+    scores: { ...record.scores },
+    notes: record.notes.map((note) => ({ ...note })),
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+function serializeEvaluationSessionPlayer(
+  summary: SerializedTryoutPlayerSummary,
+  player: PlayerItem,
+  team: TryoutTeam,
+  groups: TryoutGroup[],
+): SerializedEvaluationSessionPlayer {
+  const profile = normalizePlayerProfile(player.profile, '', 'player');
+  const latestTeam = getMostRecentTeamHistoryEntry(profile.teamHistory);
+
+  return {
+    playerId: player.playerId,
+    firstName: profile.firstName,
+    lastName: profile.lastName,
+    displayName: summary.displayName,
+    jerseyNumber: summary.jerseyNumber,
+    groupId: team.groupId,
+    groupName: getTryoutGroupName(team.groupId, groups),
+    teamId: team.id,
+    teamName: team.name,
+    birthYear: profile.birthYear,
+    lastTeamName: latestTeam?.teamName || profile.currentTeam,
+    position: profile.primaryPosition || profile.positions,
+    heightDisplay: formatHeightDisplay(profile.latestHeightFeet, profile.latestHeightInches),
+    weightDisplay: formatWeightDisplay(profile.latestWeightPounds),
+    yearsPlaying: calculateYearsPlaying(profile.firstYearPlayingHockey),
+    completedBy: profile.completedBy,
+    intake: sanitizeAnswers(player.intake.answers),
   };
 }
 
@@ -3043,6 +3804,64 @@ function matchesTryoutGroup(
     group.allowedGenders.includes(gender as TryoutGender);
 
   return matchesBirthYear && matchesGender;
+}
+
+function getTryoutGroupName(groupId: string, groups: TryoutGroup[]): string {
+  return groups.find((group) => group.id === groupId)?.name ?? 'Unknown group';
+}
+
+function compareEvaluationPlayers(
+  left: SerializedEvaluationSessionPlayer,
+  right: SerializedEvaluationSessionPlayer,
+): number {
+  const leftJersey = Number(left.jerseyNumber);
+  const rightJersey = Number(right.jerseyNumber);
+
+  if (Number.isFinite(leftJersey) && Number.isFinite(rightJersey) && leftJersey !== rightJersey) {
+    return leftJersey - rightJersey;
+  }
+
+  if (left.jerseyNumber !== right.jerseyNumber) {
+    return left.jerseyNumber.localeCompare(right.jerseyNumber);
+  }
+
+  return left.displayName.localeCompare(right.displayName);
+}
+
+function formatHeightDisplay(heightFeet: string, heightInches: string): string {
+  const feet = sanitizeFreeText(heightFeet);
+  const inches = sanitizeFreeText(heightInches);
+  if (!feet && !inches) return 'Not added';
+  if (feet && inches) return `${feet}'${inches}"`;
+  if (feet) return `${feet}'`;
+  return `${inches}"`;
+}
+
+function formatWeightDisplay(weightPounds: string): string {
+  const value = sanitizeFreeText(weightPounds);
+  return value ? `${value} lb` : 'Not added';
+}
+
+function calculateYearsPlaying(firstYearPlayingHockey: string, date = new Date()): number | null {
+  const year = Number(firstYearPlayingHockey);
+  if (!Number.isInteger(year) || year < 1900 || year > date.getFullYear()) return null;
+  return Math.max(0, date.getFullYear() - year);
+}
+
+function evaluationRecordPartitionKey(
+  seasonId: string,
+  sessionId: string,
+  evaluatorUserId: string,
+): string {
+  return `EVALUATOR_SESSION#${seasonId}#${sessionId}#${evaluatorUserId}`;
+}
+
+function evaluationRecordSortKey(playerId: string): string {
+  return `PLAYER#${playerId}`;
+}
+
+function evaluationSessionKey(seasonId: string, sessionId: string): string {
+  return `EVALUATION_SESSION#${seasonId}#${sessionId}`;
 }
 
 function compareTryoutPlayers(
@@ -3157,6 +3976,480 @@ function buildDefaultEvaluationCriteria(): EvaluationCriterion[] {
   ];
 }
 
+async function buildTryoutSeasonReportPdf(
+  report: TryoutSeasonReportData,
+): Promise<Buffer> {
+  return await new Promise<Buffer>((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: 'LETTER',
+      margin: 40,
+      info: {
+        Title: `${report.season.name} Tryout Report`,
+        Author: 'Golden Bears Player Portal',
+        Subject: 'Tryout report',
+      },
+    });
+    const chunks: Buffer[] = [];
+
+    doc.on('data', (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    doc.on('end', () => {
+      resolve(Buffer.concat(chunks));
+    });
+    doc.on('error', reject);
+
+    renderTryoutSeasonReport(doc, report);
+    doc.end();
+  });
+}
+
+function renderTryoutSeasonReport(
+  doc: ReportDocument,
+  report: TryoutSeasonReportData,
+): void {
+  renderTryoutSeasonReportCover(doc, report);
+  renderTryoutSeasonReportOverview(doc, report);
+  renderTryoutSeasonReportSessionSummary(doc, report);
+
+  report.players.forEach((player, index) => {
+    doc.addPage();
+    renderTryoutSeasonReportPlayer(doc, report, player, index + 1);
+  });
+}
+
+function renderTryoutSeasonReportCover(
+  doc: ReportDocument,
+  report: TryoutSeasonReportData,
+): void {
+  doc.fillColor('#184d3b');
+  doc.font('Helvetica-Bold').fontSize(12).text(report.organization.shortName);
+  doc.moveDown(0.3);
+  doc.font('Helvetica-Bold').fontSize(24).text('Tryout Report');
+  doc.moveDown(0.1);
+  doc.font('Helvetica').fontSize(16).fillColor('#173428').text(report.season.name);
+  doc.moveDown(0.6);
+
+  doc.font('Helvetica').fontSize(10).fillColor('#476457');
+  doc.text(`Generated ${formatReportDateTime(new Date().toISOString())}`);
+  doc.text(`Tryout window ${report.organization.tryoutWindowLabel}`);
+  doc.text(`Club ${report.organization.name}`);
+  doc.moveDown(1);
+
+  renderReportSectionHeading(
+    doc,
+    'Season Summary',
+    'This report includes the full tryout structure, player profile and intake details, plus every saved evaluation record for the selected season.',
+  );
+
+  writeReportMetricLine(doc, 'Players', String(report.season.players.length));
+  writeReportMetricLine(doc, 'Groups', String(report.season.groups.length));
+  writeReportMetricLine(doc, 'Teams', String(report.season.teams.length));
+  writeReportMetricLine(doc, 'Sessions', String(report.season.sessions.length));
+  writeReportMetricLine(doc, 'Saved evaluations', String(report.totalEvaluationCount));
+}
+
+function renderTryoutSeasonReportOverview(
+  doc: ReportDocument,
+  report: TryoutSeasonReportData,
+): void {
+  renderReportSectionHeading(
+    doc,
+    'Roster Structure',
+    'Players are grouped by the current tryout configuration so staff can review the same structure used in the live portal.',
+  );
+
+  if (report.season.groups.length === 0) {
+    writeReportParagraph(doc, 'No tryout groups are configured for this season.');
+    return;
+  }
+
+  report.season.groups.forEach((group) => {
+    ensureReportSpace(doc, 60);
+    const groupPlayers = report.players.filter(
+      (player) => player.summary.effectiveGroupId === group.id,
+    );
+    const groupTeams = report.season.teams.filter((team) => team.groupId === group.id);
+
+    renderReportSubheading(doc, group.name);
+    writeLabelValueLine(
+      doc,
+      'Eligible birth years',
+      group.allowedBirthYears.join(', ') || 'Not configured',
+    );
+    writeLabelValueLine(
+      doc,
+      'Allowed genders',
+      group.allowedGenders.join(', ') || 'Not configured',
+    );
+    writeLabelValueLine(doc, 'Players currently assigned', String(groupPlayers.length));
+
+    if (groupTeams.length === 0) {
+      writeReportParagraph(doc, 'No tryout teams are configured inside this group yet.');
+    } else {
+      groupTeams.forEach((team) => {
+        const roster = report.players.filter((player) => player.summary.teamId === team.id);
+        writeBulletLine(
+          doc,
+          `${team.name}: ${roster.length} player${roster.length === 1 ? '' : 's'}`,
+        );
+      });
+    }
+  });
+
+  const unassignedPlayers = report.players.filter(
+    (player) => player.summary.effectiveGroupId === null,
+  );
+  if (unassignedPlayers.length > 0) {
+    renderReportSubheading(doc, 'Unassigned Pool');
+    writeReportParagraph(
+      doc,
+      `${unassignedPlayers.length} player${unassignedPlayers.length === 1 ? '' : 's'} currently sit outside a configured tryout group.`,
+    );
+    unassignedPlayers.forEach((player) => {
+      writeBulletLine(doc, buildReportPlayerLine(player.summary.displayName, player.summary.jerseyNumber));
+    });
+  }
+}
+
+function renderTryoutSeasonReportSessionSummary(
+  doc: ReportDocument,
+  report: TryoutSeasonReportData,
+): void {
+  renderReportSectionHeading(
+    doc,
+    'Session Coverage',
+    'Each session below shows roster coverage and how many saved evaluator records exist for the players attached to that session.',
+  );
+
+  if (report.sessionSummaries.length === 0) {
+    writeReportParagraph(doc, 'No evaluation sessions are configured for this season.');
+    return;
+  }
+
+  report.sessionSummaries.forEach((sessionSummary) => {
+    ensureReportSpace(doc, 74);
+    renderReportSubheading(doc, sessionSummary.session.name);
+    writeLabelValueLine(
+      doc,
+      'Template',
+      sessionSummary.template?.name ?? 'No evaluation template assigned',
+    );
+    writeLabelValueLine(
+      doc,
+      'Teams',
+      sessionSummary.teamNames.join(', ') || 'No teams attached',
+    );
+    writeLabelValueLine(
+      doc,
+      'Roster coverage',
+      `${sessionSummary.evaluatedPlayerCount} of ${sessionSummary.rosterCount} players have saved evaluation data`,
+    );
+    writeLabelValueLine(
+      doc,
+      'Records',
+      `${sessionSummary.evaluationCount} evaluation record${sessionSummary.evaluationCount === 1 ? '' : 's'} from ${sessionSummary.evaluatorCount} evaluator${sessionSummary.evaluatorCount === 1 ? '' : 's'}`,
+    );
+  });
+}
+
+function renderTryoutSeasonReportPlayer(
+  doc: ReportDocument,
+  report: TryoutSeasonReportData,
+  reportPlayer: TryoutSeasonReportPlayer,
+  index: number,
+): void {
+  const profile = normalizePlayerProfile(reportPlayer.player.profile, '', 'player');
+  const intake = sanitizeAnswers(reportPlayer.player.intake.answers);
+  const lastTeamHistory = [...profile.teamHistory].sort((left, right) =>
+    right.seasonLabel.localeCompare(left.seasonLabel),
+  );
+  const measurementHistory = [...profile.physicalHistory].sort((left, right) =>
+    right.recordedAt.localeCompare(left.recordedAt),
+  );
+
+  doc.fillColor('#184d3b');
+  doc.font('Helvetica-Bold').fontSize(11).text(`Player ${index} of ${report.players.length}`);
+  doc.moveDown(0.2);
+  doc.font('Helvetica-Bold').fontSize(20).fillColor('#173428').text(
+    buildReportPlayerLine(reportPlayer.summary.displayName, reportPlayer.summary.jerseyNumber),
+  );
+  doc.moveDown(0.2);
+  doc.font('Helvetica').fontSize(10).fillColor('#476457');
+  doc.text(`${reportPlayer.groupName} | ${reportPlayer.teamName}`);
+  doc.moveDown(0.8);
+
+  renderReportSectionHeading(doc, 'Player Profile');
+  writeLabelValueLine(doc, 'Player name', profile.playerName || 'Not added');
+  writeLabelValueLine(doc, 'First name', profile.firstName || 'Not added');
+  writeLabelValueLine(doc, 'Last name', profile.lastName || 'Not added');
+  writeLabelValueLine(doc, 'Birth year', profile.birthYear || 'Not added');
+  writeLabelValueLine(doc, 'Gender', profile.gender || 'Not added');
+  writeLabelValueLine(doc, 'Primary position', profile.primaryPosition || 'Not added');
+  writeLabelValueLine(doc, 'Additional positions', profile.positions || 'Not added');
+  writeLabelValueLine(doc, 'Handedness', profile.handedness || 'Not added');
+  writeLabelValueLine(doc, 'First year playing hockey', profile.firstYearPlayingHockey || 'Not added');
+  writeLabelValueLine(
+    doc,
+    'Years playing hockey',
+    stringifyNullableNumber(calculateYearsPlaying(profile.firstYearPlayingHockey)),
+  );
+  writeLabelValueLine(doc, 'Current team', profile.currentTeam || 'Not added');
+  writeLabelValueLine(doc, 'Latest height', formatHeightDisplay(profile.latestHeightFeet, profile.latestHeightInches));
+  writeLabelValueLine(doc, 'Latest weight', formatWeightDisplay(profile.latestWeightPounds));
+  writeLabelValueLine(doc, 'Completed by', profile.completedBy || 'Not added');
+  writeLabelValueLine(doc, 'Contact email', profile.bestContactEmail || 'Not added');
+  writeLabelValueLine(doc, 'Phone number', profile.phoneNumber || 'Not added');
+  writeLabelValueLine(doc, 'Text notifications', profile.smsOptIn ? 'Enabled' : 'Not enabled');
+
+  renderReportSubheading(doc, 'Team History');
+  if (lastTeamHistory.length === 0) {
+    writeReportParagraph(doc, 'No team history entries were added.');
+  } else {
+    lastTeamHistory.forEach((entry) => {
+      writeBulletLine(
+        doc,
+        `${entry.seasonLabel} | ${entry.teamName || 'Unnamed team'}${
+          entry.positionPlayed ? ` | ${entry.positionPlayed}` : ''
+        }`,
+      );
+    });
+  }
+
+  renderReportSubheading(doc, 'Height / Weight History');
+  if (measurementHistory.length === 0) {
+    writeReportParagraph(doc, 'No height or weight history entries were added.');
+  } else {
+    measurementHistory.forEach((entry) => {
+      writeBulletLine(
+        doc,
+        `${formatReportDate(entry.recordedAt)} | ${formatHeightDisplay(entry.heightFeet, entry.heightInches)} | ${formatWeightDisplay(entry.weightPounds)}`,
+      );
+    });
+  }
+
+  renderReportSubheading(doc, 'Tryout Intake');
+  writeLabelValueLine(doc, 'Completed by', profile.completedBy || 'Not added');
+  writeLabelValueLine(doc, 'Next season outcome', intake.nextSeasonOutcome || 'Not answered');
+  writeLabelValueLine(doc, 'Development setting', intake.developmentSetting || 'Not answered');
+  writeLabelValueLine(doc, 'Preferred role', intake.preferredRole || 'Not answered');
+  writeLabelValueLine(doc, 'Coaching style', intake.coachingStyle || 'Not answered');
+  writeLabelValueLine(
+    doc,
+    'Participation considerations',
+    intake.participationConsiderations || 'Not answered',
+  );
+  writeLabelValueLine(
+    doc,
+    'Participation note',
+    intake.participationConsiderationsNote || 'Not answered',
+  );
+  writeLabelValueLine(doc, 'Additional insight', intake.additionalInsight || 'Not answered');
+
+  renderReportSubheading(doc, 'Evaluation Records');
+  if (reportPlayer.sessionEntries.length === 0) {
+    writeReportParagraph(
+      doc,
+      'This player is not attached to any tryout evaluation session and has no saved evaluation records yet.',
+    );
+    return;
+  }
+
+  reportPlayer.sessionEntries.forEach((entry) => {
+    ensureReportSpace(doc, 90);
+    renderReportSubheading(doc, entry.session.name);
+    writeLabelValueLine(doc, 'Teams', entry.teamNames.join(', ') || 'No teams attached');
+    writeLabelValueLine(
+      doc,
+      'Template',
+      entry.template?.name ?? 'No evaluation template assigned',
+    );
+    writeLabelValueLine(
+      doc,
+      'Saved records',
+      `${entry.records.length} evaluation record${entry.records.length === 1 ? '' : 's'}`,
+    );
+
+    if (entry.records.length === 0) {
+      writeReportParagraph(doc, 'No evaluation records were saved for this player in this session.');
+      return;
+    }
+
+    if (entry.template) {
+      renderReportSubheading(doc, 'Session criterion averages');
+      buildSessionCriterionAverages(entry.records, entry.template).forEach((average) => {
+        writeBulletLine(
+          doc,
+          `${average.title} (W${average.weight}) | ${
+            average.count > 0 ? `${average.average.toFixed(2)} across ${average.count}` : 'No saved scores'
+          }`,
+        );
+      });
+    }
+
+    renderReportSubheading(doc, 'Evaluator detail');
+    entry.records.forEach((record) => {
+      ensureReportSpace(doc, 60);
+      writeLabelValueLine(
+        doc,
+        'Evaluator',
+        `${record.evaluatorName} | Updated ${formatReportDateTime(record.updatedAt)}`,
+      );
+      if (entry.template) {
+        const scoreLine = entry.template.criteria
+          .map((criterion) => {
+            const score = record.scores[criterion.id];
+            return `${criterion.title}: ${score ?? '-'}`;
+          })
+          .join(' | ');
+        writeLabelValueLine(doc, 'Scores', scoreLine || 'No scores saved');
+      }
+
+      if (record.notes.length === 0) {
+        writeLabelValueLine(doc, 'Notes', 'No notes saved');
+      } else {
+        writeLabelValueLine(doc, 'Notes', `${record.notes.length} note${record.notes.length === 1 ? '' : 's'}`);
+        record.notes.forEach((note) => {
+          writeBulletLine(
+            doc,
+            `${formatReportDateTime(note.updatedAt)} | ${note.text}`,
+          );
+        });
+      }
+    });
+  });
+}
+
+function buildSessionCriterionAverages(
+  records: EvaluationRecordItem[],
+  template: EvaluationTemplateItem,
+): Array<{ title: string; weight: number; average: number; count: number }> {
+  return template.criteria.map((criterion) => {
+    const values = records
+      .map((record) => record.scores[criterion.id])
+      .filter((score): score is EvaluationScoreValue => score !== null);
+
+    return {
+      title: criterion.title,
+      weight: criterion.weight,
+      average:
+        values.length > 0
+          ? values.reduce((total, value) => total + value, 0) / values.length
+          : 0,
+      count: values.length,
+    };
+  });
+}
+
+function renderReportSectionHeading(
+  doc: ReportDocument,
+  title: string,
+  description?: string,
+): void {
+  ensureReportSpace(doc, description ? 58 : 34);
+  if (doc.y > doc.page.margins.top) doc.moveDown(0.7);
+  doc.font('Helvetica-Bold').fontSize(15).fillColor('#184d3b').text(title);
+  if (description) {
+    doc.moveDown(0.15);
+    doc.font('Helvetica').fontSize(9.5).fillColor('#476457').text(description);
+  }
+  doc.moveDown(0.35);
+}
+
+function renderReportSubheading(
+  doc: ReportDocument,
+  title: string,
+): void {
+  ensureReportSpace(doc, 28);
+  if (doc.y > doc.page.margins.top + 4) doc.moveDown(0.3);
+  doc.font('Helvetica-Bold').fontSize(11.5).fillColor('#173428').text(title);
+  doc.moveDown(0.1);
+}
+
+function writeReportMetricLine(
+  doc: ReportDocument,
+  label: string,
+  value: string,
+): void {
+  writeLabelValueLine(doc, label, value);
+}
+
+function writeLabelValueLine(
+  doc: ReportDocument,
+  label: string,
+  value: string,
+): void {
+  ensureReportSpace(doc, 24);
+  doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#173428').text(`${label}: `, {
+    continued: true,
+  });
+  doc.font('Helvetica').fontSize(9.5).fillColor('#2f4d40').text(value || 'Not added');
+}
+
+function writeReportParagraph(
+  doc: ReportDocument,
+  value: string,
+): void {
+  ensureReportSpace(doc, 24);
+  doc.font('Helvetica').fontSize(9.5).fillColor('#2f4d40').text(value);
+}
+
+function writeBulletLine(
+  doc: ReportDocument,
+  value: string,
+): void {
+  ensureReportSpace(doc, 22);
+  doc.font('Helvetica').fontSize(9.25).fillColor('#2f4d40').text(`- ${value}`);
+}
+
+function ensureReportSpace(
+  doc: ReportDocument,
+  minimumHeight: number,
+): void {
+  const bottomLimit = doc.page.height - doc.page.margins.bottom;
+  if (doc.y + minimumHeight > bottomLimit) {
+    doc.addPage();
+  }
+}
+
+function buildReportPlayerLine(displayName: string, jerseyNumber: string): string {
+  const baseName = displayName.replace(/\s+\(\d{2}\)$/, '');
+  return `${baseName} #${jerseyNumber || '--'}`;
+}
+
+function stringifyNullableNumber(value: number | null): string {
+  return value === null ? 'Not added' : String(value);
+}
+
+function formatReportDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date);
+}
+
+function formatReportDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function buildReportFileName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 class ApiError extends Error {
   constructor(public readonly statusCode: number, message: string) { super(message); }
 }
@@ -3178,4 +4471,21 @@ function claim(value: unknown): string {
 
 function json(statusCode: number, body: unknown): APIGatewayProxyStructuredResultV2 {
   return { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
+}
+
+function pdf(
+  statusCode: number,
+  body: Buffer,
+  fileName: string,
+): APIGatewayProxyStructuredResultV2 {
+  return {
+    statusCode,
+    isBase64Encoded: true,
+    headers: {
+      'content-type': 'application/pdf',
+      'content-disposition': `attachment; filename="${fileName}"`,
+      'cache-control': 'no-store',
+    },
+    body: body.toString('base64'),
+  };
 }

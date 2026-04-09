@@ -8,7 +8,9 @@
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.931.0",
-    "@aws-sdk/lib-dynamodb": "^3.931.0"
+    "@aws-sdk/lib-dynamodb": "^3.931.0",
+    "@types/pdfkit": "^0.17.5",
+    "pdfkit": "^0.18.0"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.157",
