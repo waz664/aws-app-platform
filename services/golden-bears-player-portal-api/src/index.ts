@@ -6,6 +6,7 @@ import type {
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   BatchGetCommand,
+  DeleteCommand,
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
@@ -75,6 +76,77 @@ type OrganizationItem = {
   intakeIntro: string;
   createdAt: string;
   updatedAt: string;
+  updatedByUserId: string;
+};
+
+type EvaluationCriterion = {
+  id: string;
+  title: string;
+  weight: number;
+  score1Description: string;
+  score3Description: string;
+  score5Description: string;
+};
+
+type EvaluationTemplateItem = {
+  pk: string;
+  sk: string;
+  entityType: 'EvaluationTemplate';
+  organizationId: string;
+  templateId: string;
+  name: string;
+  criteria: EvaluationCriterion[];
+  createdAt: string;
+  updatedAt: string;
+  createdByUserId: string;
+  updatedByUserId: string;
+};
+
+type TryoutGender = 'Male' | 'Female' | 'Non-binary' | 'Prefer not to say';
+
+type TryoutGroup = {
+  id: string;
+  name: string;
+  allowedBirthYears: string[];
+  allowedGenders: TryoutGender[];
+};
+
+type TryoutTeam = {
+  id: string;
+  groupId: string;
+  name: string;
+};
+
+type TryoutSession = {
+  id: string;
+  name: string;
+  teamIds: string[];
+};
+
+type TryoutPlayerAssignmentMode = 'default' | 'manual' | 'unassigned';
+
+type TryoutPlayerOverride = {
+  playerId: string;
+  assignmentMode: TryoutPlayerAssignmentMode;
+  groupId: string | null;
+  teamId: string | null;
+  jerseyNumber: string;
+};
+
+type TryoutSeasonItem = {
+  pk: string;
+  sk: string;
+  entityType: 'TryoutSeason';
+  organizationId: string;
+  seasonId: string;
+  name: string;
+  groups: TryoutGroup[];
+  teams: TryoutTeam[];
+  sessions: TryoutSession[];
+  playerOverrides: TryoutPlayerOverride[];
+  createdAt: string;
+  updatedAt: string;
+  createdByUserId: string;
   updatedByUserId: string;
 };
 
@@ -262,6 +334,29 @@ type OrganizationSettingsInput = {
   intakeIntro?: string;
 };
 
+type EvaluationTemplateCreateInput = {
+  name?: string;
+  sourceTemplateId?: string;
+  useDefaultCriteria?: boolean;
+};
+
+type EvaluationTemplateUpdateInput = {
+  name?: string;
+  criteria?: EvaluationCriterion[];
+};
+
+type TryoutSeasonCreateInput = {
+  name?: string;
+};
+
+type TryoutSeasonUpdateInput = {
+  name?: string;
+  groups?: TryoutGroup[];
+  teams?: TryoutTeam[];
+  sessions?: TryoutSession[];
+  playerOverrides?: TryoutPlayerOverride[];
+};
+
 type UserProfileUpdateInput = {
   primaryRole?: PrimaryRole | null;
   firstName?: string;
@@ -299,6 +394,40 @@ type AdminUserDirectoryEntry = {
 type AdminUsersResponse = {
   users: AdminUserDirectoryEntry[];
   nextCursor: string | null;
+};
+
+type SerializedEvaluationTemplate = {
+  id: string;
+  name: string;
+  criteria: EvaluationCriterion[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+type SerializedTryoutPlayerSummary = {
+  playerId: string;
+  firstName: string;
+  lastName: string;
+  birthYear: string;
+  gender: string;
+  displayName: string;
+  eligibleGroupIds: string[];
+  defaultGroupId: string | null;
+  effectiveGroupId: string | null;
+  teamId: string | null;
+  jerseyNumber: string;
+};
+
+type SerializedTryoutSeason = {
+  id: string;
+  name: string;
+  groups: TryoutGroup[];
+  teams: TryoutTeam[];
+  sessions: TryoutSession[];
+  playerOverrides: TryoutPlayerOverride[];
+  players: SerializedTryoutPlayerSummary[];
+  createdAt: string;
+  updatedAt: string;
 };
 
 type BootstrapResponse = {
@@ -372,6 +501,56 @@ export async function handler(
           email,
           decodeURIComponent(path.split('/')[3]),
           event.body,
+        ),
+      );
+    }
+    if (method === 'GET' && path === '/admin/evaluation-templates') {
+      return json(200, await listEvaluationTemplatesResponse(userId));
+    }
+    if (method === 'POST' && path === '/admin/evaluation-templates') {
+      return json(200, await createEvaluationTemplateResponse(userId, event.body));
+    }
+    if (method === 'PUT' && /^\/admin\/evaluation-templates\/[^/]+$/.test(path)) {
+      return json(
+        200,
+        await updateEvaluationTemplateResponse(
+          userId,
+          decodeURIComponent(path.split('/')[3]),
+          event.body,
+        ),
+      );
+    }
+    if (method === 'DELETE' && /^\/admin\/evaluation-templates\/[^/]+$/.test(path)) {
+      return json(
+        200,
+        await deleteEvaluationTemplateResponse(
+          userId,
+          decodeURIComponent(path.split('/')[3]),
+        ),
+      );
+    }
+    if (method === 'GET' && path === '/tryout-seasons') {
+      return json(200, await listTryoutSeasonsResponse(userId));
+    }
+    if (method === 'POST' && path === '/tryout-seasons') {
+      return json(200, await createTryoutSeasonResponse(userId, event.body));
+    }
+    if (method === 'PUT' && /^\/tryout-seasons\/[^/]+$/.test(path)) {
+      return json(
+        200,
+        await updateTryoutSeasonResponse(
+          userId,
+          decodeURIComponent(path.split('/')[2]),
+          event.body,
+        ),
+      );
+    }
+    if (method === 'DELETE' && /^\/tryout-seasons\/[^/]+$/.test(path)) {
+      return json(
+        200,
+        await deleteTryoutSeasonResponse(
+          userId,
+          decodeURIComponent(path.split('/')[2]),
         ),
       );
     }
@@ -626,6 +805,213 @@ async function updateAdminUserResponse(
   ]);
   if (!updatedProfile) throw notFound('Updated user profile not found.');
   return serializeAdminUser(updatedProfile, updatedAccess);
+}
+
+async function listEvaluationTemplatesResponse(
+  userId: string,
+): Promise<SerializedEvaluationTemplate[]> {
+  await assertCanManageOrganization(userId);
+  const templates = await listEvaluationTemplateItems();
+  return templates.map(serializeEvaluationTemplate);
+}
+
+async function createEvaluationTemplateResponse(
+  userId: string,
+  body: string | undefined,
+): Promise<SerializedEvaluationTemplate> {
+  await assertCanManageOrganization(userId);
+  const payload = parseJsonBody<EvaluationTemplateCreateInput>(body);
+
+  if (payload.useDefaultCriteria && payload.sourceTemplateId) {
+    throw badRequest('Choose either default criteria or a source template copy, not both.');
+  }
+
+  let criteria: EvaluationCriterion[];
+  let fallbackName: string;
+
+  if (payload.sourceTemplateId) {
+    const sourceTemplate = await getEvaluationTemplateItem(payload.sourceTemplateId);
+    if (!sourceTemplate) throw notFound('Source evaluation template not found.');
+    criteria = sourceTemplate.criteria.map((criterion) => ({
+      ...criterion,
+      id: randomUUID(),
+    }));
+    fallbackName = `${sourceTemplate.name} Copy`;
+  } else if (payload.useDefaultCriteria) {
+    criteria = buildDefaultEvaluationCriteria();
+    fallbackName = 'Core tryout evaluation template';
+  } else {
+    criteria = [buildBlankEvaluationCriterion()];
+    fallbackName = 'New evaluation template';
+  }
+
+  const now = new Date().toISOString();
+  const templateId = randomUUID();
+  const templateItem: EvaluationTemplateItem = {
+    pk: organizationKey(ORGANIZATION_ID),
+    sk: evaluationTemplateKey(templateId),
+    entityType: 'EvaluationTemplate',
+    organizationId: ORGANIZATION_ID,
+    templateId,
+    name: sanitizeRequiredText(payload.name, fallbackName, 'Template name'),
+    criteria,
+    createdAt: now,
+    updatedAt: now,
+    createdByUserId: userId,
+    updatedByUserId: userId,
+  };
+
+  await saveEvaluationTemplateItem(templateItem);
+  return serializeEvaluationTemplate(templateItem);
+}
+
+async function updateEvaluationTemplateResponse(
+  userId: string,
+  templateId: string,
+  body: string | undefined,
+): Promise<SerializedEvaluationTemplate> {
+  await assertCanManageOrganization(userId);
+  const existingTemplate = await getEvaluationTemplateItem(templateId);
+  if (!existingTemplate) throw notFound('Evaluation template not found.');
+
+  const payload = parseJsonBody<EvaluationTemplateUpdateInput>(body);
+  const updatedTemplate: EvaluationTemplateItem = {
+    ...existingTemplate,
+    name: sanitizeRequiredText(payload.name, existingTemplate.name, 'Template name'),
+    criteria: sanitizeEvaluationCriteria(payload.criteria, existingTemplate.criteria),
+    updatedAt: new Date().toISOString(),
+    updatedByUserId: userId,
+  };
+
+  await saveEvaluationTemplateItem(updatedTemplate);
+  return serializeEvaluationTemplate(updatedTemplate);
+}
+
+async function deleteEvaluationTemplateResponse(
+  userId: string,
+  templateId: string,
+): Promise<{ deletedTemplateId: string }> {
+  await assertCanManageOrganization(userId);
+  const existingTemplate = await getEvaluationTemplateItem(templateId);
+  if (!existingTemplate) throw notFound('Evaluation template not found.');
+
+  await dynamo.send(
+    new DeleteCommand({
+      TableName: APP_DATA_TABLE_NAME,
+      Key: {
+        pk: organizationKey(ORGANIZATION_ID),
+        sk: evaluationTemplateKey(templateId),
+      },
+    }),
+  );
+
+  return { deletedTemplateId: templateId };
+}
+
+async function listTryoutSeasonsResponse(
+  userId: string,
+): Promise<SerializedTryoutSeason[]> {
+  await assertCanManageTryouts(userId);
+  const seasons = await listTryoutSeasonItems();
+  if (seasons.length === 0) return [];
+
+  const players = await scanAll<PlayerItem>('Player');
+  return seasons.map((season) => serializeTryoutSeason(season, players));
+}
+
+async function createTryoutSeasonResponse(
+  userId: string,
+  body: string | undefined,
+): Promise<SerializedTryoutSeason> {
+  await assertCanManageTryouts(userId);
+  const payload = parseJsonBody<TryoutSeasonCreateInput>(body);
+  const now = new Date().toISOString();
+  const seasonId = randomUUID();
+  const seasonItem: TryoutSeasonItem = {
+    pk: organizationKey(ORGANIZATION_ID),
+    sk: tryoutSeasonKey(seasonId),
+    entityType: 'TryoutSeason',
+    organizationId: ORGANIZATION_ID,
+    seasonId,
+    name: sanitizeRequiredText(payload.name, '', 'Tryout season name'),
+    groups: [],
+    teams: [],
+    sessions: [],
+    playerOverrides: [],
+    createdAt: now,
+    updatedAt: now,
+    createdByUserId: userId,
+    updatedByUserId: userId,
+  };
+
+  await saveTryoutSeasonItem(seasonItem);
+  const players = await scanAll<PlayerItem>('Player');
+  return serializeTryoutSeason(seasonItem, players);
+}
+
+async function updateTryoutSeasonResponse(
+  userId: string,
+  seasonId: string,
+  body: string | undefined,
+): Promise<SerializedTryoutSeason> {
+  await assertCanManageTryouts(userId);
+  const existingSeason = await getTryoutSeasonItem(seasonId);
+  if (!existingSeason) throw notFound('Tryout season not found.');
+
+  const payload = parseJsonBody<TryoutSeasonUpdateInput>(body);
+  const sanitizedGroups = sanitizeTryoutGroups(payload.groups, existingSeason.groups);
+  const sanitizedTeams = sanitizeTryoutTeams(payload.teams, sanitizedGroups, existingSeason.teams);
+  const sanitizedSessions = sanitizeTryoutSessions(
+    payload.sessions,
+    sanitizedTeams,
+    existingSeason.sessions,
+  );
+  const players = await scanAll<PlayerItem>('Player');
+  const playerIdSet = new Set(
+    players.map((player) => player.playerId),
+  );
+  const sanitizedOverrides = sanitizeTryoutPlayerOverrides(
+    payload.playerOverrides,
+    playerIdSet,
+    sanitizedGroups,
+    sanitizedTeams,
+    existingSeason.playerOverrides,
+  );
+
+  const updatedSeason: TryoutSeasonItem = {
+    ...existingSeason,
+    name: sanitizeRequiredText(payload.name, existingSeason.name, 'Tryout season name'),
+    groups: sanitizedGroups,
+    teams: sanitizedTeams,
+    sessions: sanitizedSessions,
+    playerOverrides: sanitizedOverrides,
+    updatedAt: new Date().toISOString(),
+    updatedByUserId: userId,
+  };
+
+  await saveTryoutSeasonItem(updatedSeason);
+  return serializeTryoutSeason(updatedSeason, players);
+}
+
+async function deleteTryoutSeasonResponse(
+  userId: string,
+  seasonId: string,
+): Promise<{ deletedSeasonId: string }> {
+  await assertCanManageTryouts(userId);
+  const existingSeason = await getTryoutSeasonItem(seasonId);
+  if (!existingSeason) throw notFound('Tryout season not found.');
+
+  await dynamo.send(
+    new DeleteCommand({
+      TableName: APP_DATA_TABLE_NAME,
+      Key: {
+        pk: organizationKey(ORGANIZATION_ID),
+        sk: tryoutSeasonKey(seasonId),
+      },
+    }),
+  );
+
+  return { deletedSeasonId: seasonId };
 }
 
 async function createPlayerResponse(userId: string, email: string, body: string | undefined): Promise<{ bootstrap: BootstrapResponse; player: SerializedPlayer }> {
@@ -1041,6 +1427,98 @@ async function saveOrganizationSettings(
       updatedByUserId: userId,
     } satisfies OrganizationItem,
   }));
+}
+
+async function listEvaluationTemplateItems(): Promise<EvaluationTemplateItem[]> {
+  const response = await dynamo.send(
+    new QueryCommand({
+      TableName: APP_DATA_TABLE_NAME,
+      KeyConditionExpression: 'pk = :pk and begins_with(sk, :sk)',
+      ExpressionAttributeValues: {
+        ':pk': organizationKey(ORGANIZATION_ID),
+        ':sk': 'EVALUATION_TEMPLATE#',
+      },
+    }),
+  );
+
+  const items = (response.Items as EvaluationTemplateItem[] | undefined) ?? [];
+  return items.sort((left, right) => {
+    if (left.updatedAt !== right.updatedAt) {
+      return right.updatedAt.localeCompare(left.updatedAt);
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+}
+
+async function getEvaluationTemplateItem(
+  templateId: string,
+): Promise<EvaluationTemplateItem | null> {
+  const response = await dynamo.send(
+    new GetCommand({
+      TableName: APP_DATA_TABLE_NAME,
+      Key: {
+        pk: organizationKey(ORGANIZATION_ID),
+        sk: evaluationTemplateKey(templateId),
+      },
+    }),
+  );
+
+  return (response.Item as EvaluationTemplateItem | undefined) ?? null;
+}
+
+async function saveEvaluationTemplateItem(
+  item: EvaluationTemplateItem,
+): Promise<void> {
+  await dynamo.send(
+    new PutCommand({
+      TableName: APP_DATA_TABLE_NAME,
+      Item: item,
+    }),
+  );
+}
+
+async function listTryoutSeasonItems(): Promise<TryoutSeasonItem[]> {
+  const response = await dynamo.send(
+    new QueryCommand({
+      TableName: APP_DATA_TABLE_NAME,
+      KeyConditionExpression: 'pk = :pk and begins_with(sk, :sk)',
+      ExpressionAttributeValues: {
+        ':pk': organizationKey(ORGANIZATION_ID),
+        ':sk': 'TRYOUT_SEASON#',
+      },
+    }),
+  );
+
+  const items = (response.Items as TryoutSeasonItem[] | undefined) ?? [];
+  return items.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+async function getTryoutSeasonItem(
+  seasonId: string,
+): Promise<TryoutSeasonItem | null> {
+  const response = await dynamo.send(
+    new GetCommand({
+      TableName: APP_DATA_TABLE_NAME,
+      Key: {
+        pk: organizationKey(ORGANIZATION_ID),
+        sk: tryoutSeasonKey(seasonId),
+      },
+    }),
+  );
+
+  return (response.Item as TryoutSeasonItem | undefined) ?? null;
+}
+
+async function saveTryoutSeasonItem(
+  item: TryoutSeasonItem,
+): Promise<void> {
+  await dynamo.send(
+    new PutCommand({
+      TableName: APP_DATA_TABLE_NAME,
+      Item: item,
+    }),
+  );
 }
 
 async function getUserProfile(userId: string): Promise<UserProfileItem | null> {
@@ -1508,6 +1986,24 @@ async function assertCanManageOrganization(userId: string): Promise<void> {
   }
 }
 
+async function assertCanManageTryouts(userId: string): Promise<void> {
+  const [resolvedAccess, userProfile] = await Promise.all([
+    resolveAccess(userId),
+    getUserProfile(userId),
+  ]);
+
+  const canManage =
+    resolvedAccess.currentRoles.includes('club-admin') ||
+    resolvedAccess.currentRoles.includes('platform-admin') ||
+    resolvedAccess.currentRoles.includes('coach') ||
+    resolvedAccess.currentRoles.includes('manager') ||
+    userProfile?.primaryRole === 'staff';
+
+  if (!canManage) {
+    throw forbidden('Only coaching staff can manage tryout planning.');
+  }
+}
+
 function getManagedAccessRoles(
   existingAccess: AppAccessItem | undefined,
   nextPrimaryRole: PrimaryRole,
@@ -1720,6 +2216,276 @@ function sanitizeOrganizationSettings(
     tryoutWindowEnd: sanitizeDate(payload.tryoutWindowEnd, base.tryoutWindowEnd, 'Tryout window end'),
     intakeIntro: sanitizeRequiredText(payload.intakeIntro, base.intakeIntro, 'Intake introduction'),
   };
+}
+
+function sanitizeEvaluationCriteria(
+  criteria: unknown,
+  fallback: EvaluationCriterion[] = [],
+): EvaluationCriterion[] {
+  const sourceCriteria =
+    criteria === undefined
+      ? fallback
+      : Array.isArray(criteria)
+        ? criteria
+        : null;
+
+  if (!sourceCriteria) {
+    throw badRequest('Evaluation criteria must be provided as a list.');
+  }
+
+  const sanitizedCriteria = sourceCriteria.map((criterion, index) =>
+    sanitizeEvaluationCriterion(criterion, index),
+  );
+
+  if (sanitizedCriteria.length === 0) {
+    throw badRequest('At least one evaluation criterion is required.');
+  }
+
+  return sanitizedCriteria;
+}
+
+function sanitizeTryoutGroups(
+  groups: unknown,
+  fallback: TryoutGroup[] = [],
+): TryoutGroup[] {
+  const sourceGroups =
+    groups === undefined ? fallback : Array.isArray(groups) ? groups : null;
+  if (!sourceGroups) {
+    throw badRequest('Tryout groups must be provided as a list.');
+  }
+
+  const seenIds = new Set<string>();
+  return sourceGroups.map((group, index) => {
+    const record = asRecord(group);
+    const sanitizedGroup: TryoutGroup = {
+      id: sanitizeIdentifier(record.id),
+      name: sanitizeRequiredText(
+        typeof record.name === 'string' ? record.name : undefined,
+        `Group ${index + 1}`,
+        `Tryout group ${index + 1} name`,
+      ),
+      allowedBirthYears: sanitizeTryoutBirthYears(record.allowedBirthYears),
+      allowedGenders: sanitizeTryoutGenders(record.allowedGenders),
+    };
+
+    if (seenIds.has(sanitizedGroup.id)) {
+      throw badRequest('Tryout groups must have unique ids.');
+    }
+    seenIds.add(sanitizedGroup.id);
+    return sanitizedGroup;
+  });
+}
+
+function sanitizeTryoutBirthYears(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(
+    value
+      .map((entry) => sanitizeYearField(entry, '', 'Birth year'))
+      .filter(Boolean),
+  )].sort();
+}
+
+function sanitizeTryoutGenders(value: unknown): TryoutGender[] {
+  if (!Array.isArray(value)) return [];
+  const genders = value.filter(
+    (entry): entry is TryoutGender =>
+      entry === 'Male' ||
+      entry === 'Female' ||
+      entry === 'Non-binary' ||
+      entry === 'Prefer not to say',
+  );
+  return [...new Set(genders)];
+}
+
+function sanitizeTryoutTeams(
+  teams: unknown,
+  groups: TryoutGroup[],
+  fallback: TryoutTeam[] = [],
+): TryoutTeam[] {
+  const sourceTeams =
+    teams === undefined ? fallback : Array.isArray(teams) ? teams : null;
+  if (!sourceTeams) {
+    throw badRequest('Tryout teams must be provided as a list.');
+  }
+
+  const validGroupIds = new Set(groups.map((group) => group.id));
+  const seenIds = new Set<string>();
+
+  return sourceTeams.map((team, index) => {
+    const record = asRecord(team);
+    const sanitizedTeam: TryoutTeam = {
+      id: sanitizeIdentifier(record.id),
+      groupId: sanitizeFreeText(record.groupId),
+      name: sanitizeRequiredText(
+        typeof record.name === 'string' ? record.name : undefined,
+        `Team ${index + 1}`,
+        `Tryout team ${index + 1} name`,
+      ),
+    };
+
+    if (!validGroupIds.has(sanitizedTeam.groupId)) {
+      throw badRequest(`Tryout team "${sanitizedTeam.name}" must belong to a valid group.`);
+    }
+    if (seenIds.has(sanitizedTeam.id)) {
+      throw badRequest('Tryout teams must have unique ids.');
+    }
+    seenIds.add(sanitizedTeam.id);
+    return sanitizedTeam;
+  });
+}
+
+function sanitizeTryoutSessions(
+  sessions: unknown,
+  teams: TryoutTeam[],
+  fallback: TryoutSession[] = [],
+): TryoutSession[] {
+  const sourceSessions =
+    sessions === undefined ? fallback : Array.isArray(sessions) ? sessions : null;
+  if (!sourceSessions) {
+    throw badRequest('Tryout sessions must be provided as a list.');
+  }
+
+  const validTeamIds = new Set(teams.map((team) => team.id));
+  const seenIds = new Set<string>();
+
+  return sourceSessions.map((session, index) => {
+    const record = asRecord(session);
+    const teamIds = Array.isArray(record.teamIds)
+      ? [...new Set(
+          record.teamIds
+            .map((teamId) => sanitizeFreeText(teamId))
+            .filter((teamId) => validTeamIds.has(teamId)),
+        )]
+      : [];
+
+    const sanitizedSession: TryoutSession = {
+      id: sanitizeIdentifier(record.id),
+      name: sanitizeRequiredText(
+        typeof record.name === 'string' ? record.name : undefined,
+        `Session ${index + 1}`,
+        `Tryout session ${index + 1} name`,
+      ),
+      teamIds,
+    };
+
+    if (seenIds.has(sanitizedSession.id)) {
+      throw badRequest('Tryout sessions must have unique ids.');
+    }
+    seenIds.add(sanitizedSession.id);
+    return sanitizedSession;
+  });
+}
+
+function sanitizeTryoutPlayerOverrides(
+  overrides: unknown,
+  validPlayerIds: Set<string>,
+  groups: TryoutGroup[],
+  teams: TryoutTeam[],
+  fallback: TryoutPlayerOverride[] = [],
+): TryoutPlayerOverride[] {
+  const sourceOverrides =
+    overrides === undefined ? fallback : Array.isArray(overrides) ? overrides : null;
+  if (!sourceOverrides) {
+    throw badRequest('Tryout player overrides must be provided as a list.');
+  }
+
+  const validGroupIds = new Set(groups.map((group) => group.id));
+  const validTeamIds = new Set(teams.map((team) => team.id));
+  const seenPlayerIds = new Set<string>();
+
+  return sourceOverrides
+    .map((override) => {
+      const record = asRecord(override);
+      const playerId = sanitizeFreeText(record.playerId);
+      if (!playerId || !validPlayerIds.has(playerId) || seenPlayerIds.has(playerId)) {
+        return null;
+      }
+      seenPlayerIds.add(playerId);
+
+      const assignmentMode = sanitizeTryoutAssignmentMode(record.assignmentMode);
+      const groupId = sanitizeFreeText(record.groupId) || null;
+      const teamId = sanitizeFreeText(record.teamId) || null;
+
+      if (assignmentMode === 'manual' && (!groupId || !validGroupIds.has(groupId))) {
+        throw badRequest('Manual player assignments must reference a valid tryout group.');
+      }
+
+      return {
+        playerId,
+        assignmentMode,
+        groupId:
+          assignmentMode === 'manual' && groupId && validGroupIds.has(groupId)
+            ? groupId
+            : null,
+        teamId: teamId && validTeamIds.has(teamId) ? teamId : null,
+        jerseyNumber: sanitizeFreeText(record.jerseyNumber),
+      } satisfies TryoutPlayerOverride;
+    })
+    .filter((override): override is TryoutPlayerOverride => {
+      if (!override) return false;
+      return override.assignmentMode !== 'default' ||
+        override.groupId !== null ||
+        override.teamId !== null ||
+        override.jerseyNumber !== '';
+    });
+}
+
+function sanitizeTryoutAssignmentMode(value: unknown): TryoutPlayerAssignmentMode {
+  if (value === 'manual' || value === 'unassigned') return value;
+  return 'default';
+}
+
+function sanitizeEvaluationCriterion(
+  value: unknown,
+  index: number,
+): EvaluationCriterion {
+  const record = asRecord(value);
+  const criterionNumber = index + 1;
+
+  return {
+    id: sanitizeIdentifier(record.id),
+    title: sanitizeRequiredText(
+      typeof record.title === 'string' ? record.title : undefined,
+      `Criterion ${criterionNumber}`,
+      `Criterion ${criterionNumber} title`,
+    ),
+    weight: sanitizeCriterionWeight(record.weight, 50),
+    score1Description: sanitizeRequiredText(
+      typeof record.score1Description === 'string' ? record.score1Description : undefined,
+      'Describe what a score of 1 looks like.',
+      `Criterion ${criterionNumber} score 1 description`,
+    ),
+    score3Description: sanitizeRequiredText(
+      typeof record.score3Description === 'string' ? record.score3Description : undefined,
+      'Describe what a score of 3 looks like.',
+      `Criterion ${criterionNumber} score 3 description`,
+    ),
+    score5Description: sanitizeRequiredText(
+      typeof record.score5Description === 'string' ? record.score5Description : undefined,
+      'Describe what a score of 5 looks like.',
+      `Criterion ${criterionNumber} score 5 description`,
+    ),
+  };
+}
+
+function sanitizeCriterionWeight(value: unknown, fallback: number): number {
+  const nextValue =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim()
+        ? Number(value)
+        : fallback;
+
+  if (!Number.isFinite(nextValue)) {
+    throw badRequest('Criterion weight must be a number between 1 and 100.');
+  }
+
+  const normalizedWeight = Math.trunc(nextValue);
+  if (normalizedWeight < 1 || normalizedWeight > 100) {
+    throw badRequest('Criterion weight must be a whole number between 1 and 100.');
+  }
+
+  return normalizedWeight;
 }
 
 function sanitizeProfile(
@@ -2159,6 +2925,143 @@ function serializeInvite(invite: InviteItem): SerializedInvite {
   return { id: invite.inviteId, playerId: invite.playerId, playerName: invite.playerName, invitedEmail: invite.invitedEmail, invitedRole: invite.invitedRole, invitedByUserId: invite.invitedByUserId, invitedByLabel: invite.invitedByLabel, status: invite.status, createdAt: invite.createdAt, acceptedAt: invite.acceptedAt };
 }
 
+function serializeEvaluationTemplate(
+  template: EvaluationTemplateItem,
+): SerializedEvaluationTemplate {
+  return {
+    id: template.templateId,
+    name: template.name,
+    criteria: sanitizeEvaluationCriteria(template.criteria),
+    createdAt: template.createdAt,
+    updatedAt: template.updatedAt,
+  };
+}
+
+function serializeTryoutSeason(
+  season: TryoutSeasonItem,
+  players: PlayerItem[],
+): SerializedTryoutSeason {
+  const seasonPlayers = players.filter(
+    (player) => player.organizationId === ORGANIZATION_ID,
+  );
+  const groups = sanitizeTryoutGroups(season.groups);
+  const teams = sanitizeTryoutTeams(season.teams, groups);
+  const sessions = sanitizeTryoutSessions(season.sessions, teams);
+  const playerOverrides = sanitizeTryoutPlayerOverrides(
+    season.playerOverrides,
+    new Set(seasonPlayers.map((player) => player.playerId)),
+    groups,
+    teams,
+  );
+  const teamMap = new Map(teams.map((team) => [team.id, team]));
+  const overrideMap = new Map(
+    playerOverrides.map((override) => [override.playerId, override]),
+  );
+
+  const serializedPlayers = seasonPlayers
+    .map((player) =>
+      serializeTryoutPlayerSummary(player, groups, teamMap, overrideMap.get(player.playerId)),
+    )
+    .sort(compareTryoutPlayers);
+
+  return {
+    id: season.seasonId,
+    name: season.name,
+    groups,
+    teams,
+    sessions,
+    playerOverrides,
+    players: serializedPlayers,
+    createdAt: season.createdAt,
+    updatedAt: season.updatedAt,
+  };
+}
+
+function serializeTryoutPlayerSummary(
+  player: PlayerItem,
+  groups: TryoutGroup[],
+  teamMap: Map<string, TryoutTeam>,
+  override: TryoutPlayerOverride | undefined,
+): SerializedTryoutPlayerSummary {
+  const profile = normalizePlayerProfile(player.profile, '', 'player');
+  const eligibleGroupIds = groups
+    .filter((group) => matchesTryoutGroup(profile, group))
+    .map((group) => group.id);
+  const defaultGroupId =
+    eligibleGroupIds.length === 1 ? eligibleGroupIds[0] : null;
+
+  const effectiveGroupId =
+    override?.assignmentMode === 'manual' && override.groupId
+      ? override.groupId
+      : override?.assignmentMode === 'unassigned'
+        ? null
+        : defaultGroupId;
+
+  const resolvedTeam =
+    override?.teamId ? teamMap.get(override.teamId) : undefined;
+  const effectiveTeamId =
+    resolvedTeam && effectiveGroupId && resolvedTeam.groupId === effectiveGroupId
+      ? resolvedTeam.id
+      : null;
+
+  const playerLabel =
+    buildPlayerName(profile.firstName, profile.lastName) ||
+    profile.playerName ||
+    'Unnamed player';
+  const birthYearSuffix =
+    /^\d{4}$/.test(profile.birthYear) ? ` (${profile.birthYear.slice(-2)})` : '';
+
+  return {
+    playerId: player.playerId,
+    firstName: profile.firstName,
+    lastName: profile.lastName,
+    birthYear: profile.birthYear,
+    gender: profile.gender,
+    displayName: `${playerLabel}${birthYearSuffix}`,
+    eligibleGroupIds,
+    defaultGroupId,
+    effectiveGroupId,
+    teamId: effectiveTeamId,
+    jerseyNumber: sanitizeFreeText(override?.jerseyNumber),
+  };
+}
+
+function matchesTryoutGroup(
+  profile: PlayerProfileInput,
+  group: TryoutGroup,
+): boolean {
+  const birthYear = sanitizeFreeText(profile.birthYear);
+  const gender = sanitizeFreeText(profile.gender);
+
+  const matchesBirthYear =
+    group.allowedBirthYears.length > 0 &&
+    Boolean(birthYear) &&
+    group.allowedBirthYears.includes(birthYear);
+  const matchesGender =
+    group.allowedGenders.length > 0 &&
+    Boolean(gender) &&
+    group.allowedGenders.includes(gender as TryoutGender);
+
+  return matchesBirthYear && matchesGender;
+}
+
+function compareTryoutPlayers(
+  left: SerializedTryoutPlayerSummary,
+  right: SerializedTryoutPlayerSummary,
+): number {
+  const lastNameComparison = left.lastName.localeCompare(right.lastName);
+  if (lastNameComparison !== 0) return lastNameComparison;
+
+  const firstNameComparison = left.firstName.localeCompare(right.firstName);
+  if (firstNameComparison !== 0) return firstNameComparison;
+
+  if (left.birthYear !== right.birthYear) {
+    return left.birthYear.localeCompare(right.birthYear);
+  }
+
+  return left.displayName.localeCompare(right.displayName);
+}
+
 function parseJsonBody<T>(body: string | undefined): T {
   if (!body) return {} as T;
   return JSON.parse(body) as T;
@@ -2169,8 +3072,90 @@ function organizationKey(organizationId: string): string { return `ORGANIZATION#
 function playerKey(playerId: string): string { return `PLAYER#${playerId}`; }
 function playerLinkKey(playerId: string): string { return `PLAYER#${playerId}`; }
 function inviteKey(inviteId: string): string { return `INVITE#${inviteId}`; }
+function evaluationTemplateKey(templateId: string): string { return `EVALUATION_TEMPLATE#${templateId}`; }
+function tryoutSeasonKey(seasonId: string): string { return `TRYOUT_SEASON#${seasonId}`; }
 function invitedEmailKey(email: string): string { return `INVITED_EMAIL#${email}`; }
 function inviteStatusSortKey(status: InviteStatus, createdAt: string, inviteId: string): string { return `STATUS#${status}#${createdAt}#${inviteId}`; }
+
+function buildBlankEvaluationCriterion(): EvaluationCriterion {
+  return {
+    id: randomUUID(),
+    title: 'New criterion',
+    weight: 50,
+    score1Description: 'Describe what a score of 1 looks like.',
+    score3Description: 'Describe what a score of 3 looks like.',
+    score5Description: 'Describe what a score of 5 looks like.',
+  };
+}
+
+function buildDefaultEvaluationCriteria(): EvaluationCriterion[] {
+  return [
+    {
+      id: randomUUID(),
+      title: 'Skating / mobility',
+      weight: 50,
+      score1Description: 'Edge control and posture break down under basic pace; first few steps are slow and recoveries after pivots or turns are late; skating with the puck noticeably reduces speed or balance.',
+      score3Description: 'Functional stride and edge use for the level; can turn, stop, and transition both ways at normal game pace; can move with or without the puck but does not consistently separate or close space.',
+      score5Description: 'Efficient, balanced skater with strong edges and posture; explosive first steps and quick recovery through pivots, cutbacks, and direction changes; maintains speed, control, and timing whether supporting, defending, or carrying the puck.',
+    },
+    {
+      id: randomUUID(),
+      title: 'Puck execution',
+      weight: 50,
+      score1Description: 'Routine passes and receptions are inconsistent even with time and space; puck touches are noisy and require extra corrections; forehand/backhand execution deteriorates quickly once pressure arrives.',
+      score3Description: 'Completes routine passes and receptions at team pace; can carry and handle in open ice and basic traffic; can execute simple forehand/backhand plays but accuracy and speed drop under heavier pressure.',
+      score5Description: 'First touch is clean and sets up the next play; executes forehand/backhand plays, touch plays, and traffic plays at speed; can receive, protect, and move the puck quickly enough to create an advantage rather than just survive the touch.',
+    },
+    {
+      id: randomUUID(),
+      title: 'Puck management / decision quality',
+      weight: 50,
+      score1Description: 'Forces pucks into traffic, throws pucks away, or makes plays before scanning options; risk-reward choices are poor; possessions end quickly after touches because the player does not protect or extend the play.',
+      score3Description: 'Usually identifies the simple option after a look; will chip to space, regroup, or protect the puck when pressure is obvious; decision quality is acceptable at normal pace but slips when the game speeds up or support disappears.',
+      score5Description: 'Scans early and often, manages pressure, and chooses possession-preserving options; changes pace, angle, or point of attack to buy time and improve odds; consistently turns touches into controlled exits, entries, or extended-zone time.',
+    },
+    {
+      id: randomUUID(),
+      title: 'Hockey sense and off-puck support',
+      weight: 50,
+      score1Description: 'Watches the puck and arrives late to support or cover; off-puck routes rarely create passing options, layers, or defensive insurance; reads turnovers and transitions slowly and is often outside the next play.',
+      score3Description: 'Usually finds usable support spots and stays connected to the play; reads common breakout, rush, forecheck, and defensive triggers; contributes away from the puck but is more reactive than anticipatory.',
+      score5Description: 'Anticipates the next layer before the puck arrives; times support to create outlets, middle-lane options, second-wave attack, or defensive cover; consistently improves teammates\' decisions by being in the right place early and available.',
+    },
+    {
+      id: randomUUID(),
+      title: '1-on-1 compete / battle habits',
+      weight: 50,
+      score1Description: 'Enters battles upright, late, or without leverage; stick detail is weak and body position is easily lost; tends to avoid contact, concede inside ice, or exit battles too early.',
+      score3Description: 'Will engage and hold position through initial contact; uses acceptable stick and body habits in contested situations; compete level is present but not consistently shift-driving or possession-winning.',
+      score5Description: 'Gets low early, wins inside body position, and uses edges and leverage effectively; defends and attacks through legal stick-on-puck habits instead of reaching or hoping; repeatedly turns battles into regained pucks, extended possession, or broken opposing plays.',
+    },
+    {
+      id: randomUUID(),
+      title: 'Defensive reliability / transition detail',
+      weight: 50,
+      score1Description: 'Coverage awareness is late or confused; loses middle ice, arrives underneath too late, or fails to sort threats; retrievals and transition touches are rushed and often become blind clears or turnovers.',
+      score3Description: 'Usually protects the middle, tracks back, and handles basic assignments; 1-on-1 containment and stick positioning are adequate at team pace; can make routine retrieval-to-outlet or breakout plays when the first read is clean.',
+      score5Description: 'Identifies threats early, stays on the defensive side with purpose, and closes plays with angle/stick detail; disrupts entries, supports quickly after turnovers, and reloads consistently; transition details are dependable both ways, including retrievals, escapes, first pass, and supporting the next play.',
+    },
+    {
+      id: randomUUID(),
+      title: 'Physical readiness',
+      weight: 50,
+      score1Description: 'Pace, posture, and power fall off quickly; balance/coordination limitations show up in races, contact, and repeated efforts; player struggles to hold ground or repeat quality shifts for the level.',
+      score3Description: 'Has enough engine, balance, and strength for the current level; can repeat normal shifts without major drop-off; handles ordinary contact and pace demands but is not a physical driver of play.',
+      score5Description: 'Repeats high-tempo efforts with little decline across sessions, periods, or games; balance, coordination, and core control hold up under contact and fatigue; physical tools consistently support execution by winning races, holding lines, and staying effective late in shifts.',
+    },
+    {
+      id: randomUUID(),
+      title: 'Coachability / mental consistency / team fit',
+      weight: 50,
+      score1Description: 'Feedback does not stick, or the response is defensive, distracted, or short-lived; mistakes trigger poor body language, frustration, or loss of task focus; team behaviors are inconsistent enough that the player becomes a drag on structure or culture.',
+      score3Description: 'Takes correction respectfully and usually attempts the adjustment; emotional control and reset after mistakes are adequate; generally dependable with teammates, role expectations, and day-to-day behavior.',
+      score5Description: 'Seeks clarity, applies feedback quickly, and self-corrects between reps or shifts; stays composed under pressure and rebounds fast after errors; reliable team player who communicates well, accepts role, supports teammates, and makes the group more functional.',
+    },
+  ];
+}
 
 class ApiError extends Error {
   constructor(public readonly statusCode: number, message: string) { super(message); }

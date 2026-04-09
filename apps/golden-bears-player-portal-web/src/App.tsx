@@ -4,17 +4,25 @@ import './App.css';
 import {
   acceptInvite,
   claimOrganizationAdmin,
+  createEvaluationTemplate,
   createInvite,
   createPlayer,
+  createTryoutSeason,
+  deleteEvaluationTemplate,
+  deleteTryoutSeason,
   declineInvite,
   loadAdminUsers,
   loadBootstrapData,
+  loadEvaluationTemplates,
+  loadTryoutSeasons,
   revokeInvite,
   saveUserRole,
   updateAdminUser,
   updateCurrentUserProfile,
+  updateEvaluationTemplate,
   updatePlayer,
   updateOrganizationSettings,
+  updateTryoutSeason,
 } from './lib/data-client';
 import { beginSignIn, beginSignOut, restoreAuthSession } from './lib/auth';
 import { loadRuntimeConfig } from './lib/runtime-config';
@@ -26,6 +34,8 @@ import type {
   AuthSession,
   BootstrapData,
   CompletedByOption,
+  EvaluationCriterion,
+  EvaluationTemplate,
   IntakeAnswers,
   IntakeStatus,
   InviteRecord,
@@ -37,6 +47,11 @@ import type {
   PlayerTeamHistoryEntry,
   PrimaryRole,
   RuntimeConfig,
+  TryoutGender,
+  TryoutPlayerAssignmentMode,
+  TryoutPlayerOverride,
+  TryoutPlayerSummary,
+  TryoutSeason,
   UserProfile,
   UserRole,
 } from './types';
@@ -61,7 +76,20 @@ type EditablePlayerState = {
   intakeStatus: IntakeStatus;
 };
 
-type AdminWorkspaceView = 'overview' | 'organization' | 'users';
+type EditableEvaluationTemplateState = {
+  name: string;
+  criteria: EvaluationCriterion[];
+};
+
+type AdminWorkspaceView =
+  | 'overview'
+  | 'organization'
+  | 'tryouts'
+  | 'templates'
+  | 'users'
+  | 'profile'
+  | 'access'
+  | 'architecture';
 
 type AdminUserFiltersState = {
   query: string;
@@ -79,10 +107,48 @@ type EditableAdminUserState = {
 type UserWorkspaceView =
   | 'setup'
   | 'overview'
+  | 'tryouts'
   | 'profile'
   | 'player'
   | 'intake'
   | 'invites';
+
+type TryoutSetupCardProps = {
+  roleLabel: string;
+  seasons: TryoutSeason[];
+  draft: TryoutSeason | null;
+  loaded: boolean;
+  loading: boolean;
+  newSeasonName: string;
+  busyAction: string | null;
+  draggingPlayerId: string | null;
+  onNewSeasonNameChange: (value: string) => void;
+  onCreateSeason: () => void;
+  onSelectSeason: (seasonId: string) => void;
+  onDeleteSeason: () => void;
+  onSeasonNameChange: (value: string) => void;
+  onSaveSeason: () => void;
+  onAddGroup: () => void;
+  onUpdateGroupName: (groupId: string, value: string) => void;
+  onToggleGroupBirthYear: (groupId: string, birthYear: string, checked: boolean) => void;
+  onToggleGroupGender: (groupId: string, gender: TryoutGender, checked: boolean) => void;
+  onRemoveGroup: (groupId: string) => void;
+  onSetPlayerAssignment: (
+    playerId: string,
+    assignmentMode: TryoutPlayerAssignmentMode,
+    groupId: string | null,
+  ) => void;
+  onAddTeam: (groupId: string) => void;
+  onUpdateTeamName: (teamId: string, value: string) => void;
+  onRemoveTeam: (teamId: string) => void;
+  onAssignPlayerToTeam: (playerId: string, teamId: string | null) => void;
+  onUpdatePlayerJersey: (playerId: string, value: string) => void;
+  onAddSession: () => void;
+  onUpdateSessionName: (sessionId: string, value: string) => void;
+  onToggleSessionTeam: (sessionId: string, teamId: string, checked: boolean) => void;
+  onRemoveSession: (sessionId: string) => void;
+  onStartPlayerDrag: (playerId: string | null) => void;
+};
 
 type UserProfileFieldKey = Exclude<keyof EditableUserProfileState, 'smsOptIn'>;
 
@@ -132,6 +198,13 @@ const completedByOptions: CompletedByOption[] = [
   'Player',
   'Parent / Guardian',
   'Player and Parent together',
+];
+
+const TRYOUT_GENDERS: TryoutGender[] = [
+  'Male',
+  'Female',
+  'Non-binary',
+  'Prefer not to say',
 ];
 
 const nextSeasonOptions: ChoiceOption[] = [
@@ -301,6 +374,21 @@ function App() {
   const [adminUsersLoading, setAdminUsersLoading] = useState(false);
   const [selectedAdminUserId, setSelectedAdminUserId] = useState<string | null>(null);
   const [adminUserDraft, setAdminUserDraft] = useState<EditableAdminUserState | null>(null);
+  const [evaluationTemplates, setEvaluationTemplates] = useState<EvaluationTemplate[]>([]);
+  const [evaluationTemplatesLoaded, setEvaluationTemplatesLoaded] = useState(false);
+  const [evaluationTemplatesLoading, setEvaluationTemplatesLoading] = useState(false);
+  const [selectedEvaluationTemplateId, setSelectedEvaluationTemplateId] = useState<string | null>(
+    null,
+  );
+  const [evaluationTemplateDraft, setEvaluationTemplateDraft] =
+    useState<EditableEvaluationTemplateState | null>(null);
+  const [tryoutSeasons, setTryoutSeasons] = useState<TryoutSeason[]>([]);
+  const [tryoutSeasonsLoaded, setTryoutSeasonsLoaded] = useState(false);
+  const [tryoutSeasonsLoading, setTryoutSeasonsLoading] = useState(false);
+  const [selectedTryoutSeasonId, setSelectedTryoutSeasonId] = useState<string | null>(null);
+  const [tryoutSeasonDraft, setTryoutSeasonDraft] = useState<TryoutSeason | null>(null);
+  const [newTryoutSeasonName, setNewTryoutSeasonName] = useState('');
+  const [draggingTryoutPlayerId, setDraggingTryoutPlayerId] = useState<string | null>(null);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -419,6 +507,28 @@ function App() {
     setAdminUsersLoaded(false);
     setSelectedAdminUserId(null);
     setAdminUserDraft(null);
+    setEvaluationTemplates([]);
+    setEvaluationTemplatesLoaded(false);
+    setSelectedEvaluationTemplateId(null);
+    setEvaluationTemplateDraft(null);
+  }, [activeRole]);
+
+  useEffect(() => {
+    const canManageTryouts =
+      activeRole === 'club-admin' ||
+      activeRole === 'platform-admin' ||
+      activeRole === 'staff' ||
+      activeRole === 'coach' ||
+      activeRole === 'manager';
+
+    if (canManageTryouts) return;
+
+    setTryoutSeasons([]);
+    setTryoutSeasonsLoaded(false);
+    setSelectedTryoutSeasonId(null);
+    setTryoutSeasonDraft(null);
+    setNewTryoutSeasonName('');
+    setDraggingTryoutPlayerId(null);
   }, [activeRole]);
 
   useEffect(() => {
@@ -547,6 +657,135 @@ function App() {
       selectedUser ? buildEditableAdminUserState(selectedUser) : null,
     );
   }, [adminUsers, selectedAdminUserId]);
+
+  useEffect(() => {
+    if (
+      activeRole !== 'club-admin' &&
+      activeRole !== 'platform-admin'
+    ) {
+      return;
+    }
+    if (activeAdminSection !== 'templates') return;
+    if (!runtimeConfig || authSession?.status !== 'authenticated') return;
+
+    const currentRuntimeConfig = runtimeConfig;
+    const currentIdToken = authSession.idToken;
+    let cancelled = false;
+
+    async function loadTemplates() {
+      setEvaluationTemplatesLoading(true);
+
+      try {
+        const templates = await loadEvaluationTemplates(
+          currentRuntimeConfig,
+          currentIdToken,
+        );
+        if (cancelled) return;
+
+        setEvaluationTemplates(templates);
+        setEvaluationTemplatesLoaded(true);
+        setSelectedEvaluationTemplateId((currentValue) =>
+          currentValue && templates.some((template) => template.id === currentValue)
+            ? currentValue
+            : templates[0]?.id ?? null,
+        );
+      } catch (error) {
+        if (cancelled) return;
+        setFeedback({
+          tone: 'error',
+          message: getErrorMessage(error),
+        });
+      } finally {
+        if (!cancelled) setEvaluationTemplatesLoading(false);
+      }
+    }
+
+    void loadTemplates();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeAdminSection, activeRole, authSession, runtimeConfig]);
+
+  useEffect(() => {
+    const selectedTemplate =
+      selectedEvaluationTemplateId
+        ? evaluationTemplates.find((template) => template.id === selectedEvaluationTemplateId) ??
+          null
+        : null;
+
+    setEvaluationTemplateDraft(
+      selectedTemplate ? buildEditableEvaluationTemplateState(selectedTemplate) : null,
+    );
+  }, [evaluationTemplates, selectedEvaluationTemplateId]);
+
+  useEffect(() => {
+    const shouldLoadTryoutSeasons =
+      ((activeRole === 'club-admin' || activeRole === 'platform-admin') &&
+        activeAdminSection === 'tryouts') ||
+      ((activeRole === 'staff' ||
+        activeRole === 'coach' ||
+        activeRole === 'manager') &&
+        activeUserSection === 'tryouts');
+
+    if (!shouldLoadTryoutSeasons) return;
+    if (!runtimeConfig || authSession?.status !== 'authenticated') return;
+
+    const currentRuntimeConfig = runtimeConfig;
+    const currentIdToken = authSession.idToken;
+    let cancelled = false;
+
+    async function loadSeasons() {
+      setTryoutSeasonsLoading(true);
+
+      try {
+        const seasons = await loadTryoutSeasons(
+          currentRuntimeConfig,
+          currentIdToken,
+        );
+        if (cancelled) return;
+
+        setTryoutSeasons(seasons);
+        setTryoutSeasonsLoaded(true);
+        setSelectedTryoutSeasonId((currentValue) =>
+          currentValue && seasons.some((season) => season.id === currentValue)
+            ? currentValue
+            : seasons[0]?.id ?? null,
+        );
+      } catch (error) {
+        if (cancelled) return;
+        setFeedback({
+          tone: 'error',
+          message: getErrorMessage(error),
+        });
+      } finally {
+        if (!cancelled) setTryoutSeasonsLoading(false);
+      }
+    }
+
+    void loadSeasons();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeAdminSection,
+    activeRole,
+    activeUserSection,
+    authSession,
+    runtimeConfig,
+  ]);
+
+  useEffect(() => {
+    const selectedSeason =
+      selectedTryoutSeasonId
+        ? tryoutSeasons.find((season) => season.id === selectedTryoutSeasonId) ?? null
+        : null;
+
+    setTryoutSeasonDraft(
+      selectedSeason ? cloneTryoutSeasonState(selectedSeason) : null,
+    );
+  }, [selectedTryoutSeasonId, tryoutSeasons]);
 
   async function runAction(
     actionKey: string,
@@ -806,6 +1045,30 @@ function App() {
     });
   }
 
+  async function refreshEvaluationTemplateDirectory(
+    currentRuntimeConfig: RuntimeConfig,
+    currentIdToken: string | null,
+    preferredTemplateId?: string | null,
+  ): Promise<void> {
+    const templates = await loadEvaluationTemplates(currentRuntimeConfig, currentIdToken);
+    setEvaluationTemplates(templates);
+    setEvaluationTemplatesLoaded(true);
+    setSelectedEvaluationTemplateId((currentValue) => {
+      const requestedId =
+        preferredTemplateId === undefined ? currentValue : preferredTemplateId;
+
+      if (requestedId && templates.some((template) => template.id === requestedId)) {
+        return requestedId;
+      }
+
+      if (currentValue && templates.some((template) => template.id === currentValue)) {
+        return currentValue;
+      }
+
+      return templates[0]?.id ?? null;
+    });
+  }
+
   function applyAdminUserFilters(nextFilters: AdminUserFiltersState): void {
     setAppliedAdminUserFilters(nextFilters);
     setAdminUsersCursor(null);
@@ -873,6 +1136,633 @@ function App() {
             : 'User access and role settings have been updated.',
       });
     });
+  }
+
+  function updateEvaluationTemplateName(value: string): void {
+    setEvaluationTemplateDraft((currentValue) =>
+      currentValue
+        ? {
+            ...currentValue,
+            name: value,
+          }
+        : currentValue,
+    );
+  }
+
+  function updateEvaluationCriterionField(
+    criterionId: string,
+    field: 'title' | 'score1Description' | 'score3Description' | 'score5Description',
+    value: string,
+  ): void {
+    setEvaluationTemplateDraft((currentValue) =>
+      currentValue
+        ? {
+            ...currentValue,
+            criteria: currentValue.criteria.map((criterion) =>
+              criterion.id === criterionId
+                ? {
+                    ...criterion,
+                    [field]: value,
+                  }
+                : criterion,
+            ),
+          }
+        : currentValue,
+    );
+  }
+
+  function updateEvaluationCriterionWeight(
+    criterionId: string,
+    value: string,
+  ): void {
+    const nextWeight = normalizeCriterionWeightInput(value);
+    setEvaluationTemplateDraft((currentValue) =>
+      currentValue
+        ? {
+            ...currentValue,
+            criteria: currentValue.criteria.map((criterion) =>
+              criterion.id === criterionId
+                ? {
+                    ...criterion,
+                    weight: nextWeight,
+                  }
+                : criterion,
+            ),
+          }
+        : currentValue,
+    );
+  }
+
+  function addEvaluationCriterion(): void {
+    setEvaluationTemplateDraft((currentValue) =>
+      currentValue
+        ? {
+            ...currentValue,
+            criteria: [...currentValue.criteria, buildBlankEvaluationCriterion()],
+          }
+        : currentValue,
+    );
+  }
+
+  function removeEvaluationCriterion(criterionId: string): void {
+    setEvaluationTemplateDraft((currentValue) => {
+      if (!currentValue || currentValue.criteria.length === 1) return currentValue;
+
+      return {
+        ...currentValue,
+        criteria: currentValue.criteria.filter(
+          (criterion) => criterion.id !== criterionId,
+        ),
+      };
+    });
+  }
+
+  async function handleCreateEvaluationTemplate(
+    mode: 'blank' | 'default' | 'copy',
+  ): Promise<void> {
+    if (!runtimeConfig || authSession?.status !== 'authenticated') return;
+    if (mode === 'copy' && !selectedEvaluationTemplateId) return;
+
+    await runAction(`create-template-${mode}`, async () => {
+      const payload =
+        mode === 'default'
+          ? { useDefaultCriteria: true }
+          : mode === 'copy'
+            ? { sourceTemplateId: selectedEvaluationTemplateId ?? undefined }
+            : {};
+      const createdTemplate = await createEvaluationTemplate(
+        runtimeConfig,
+        authSession.idToken,
+        payload,
+      );
+      await refreshEvaluationTemplateDirectory(
+        runtimeConfig,
+        authSession.idToken,
+        createdTemplate.id,
+      );
+      setFeedback({
+        tone: 'success',
+        message:
+          mode === 'default'
+            ? 'A default evaluation template has been loaded and saved.'
+            : mode === 'copy'
+              ? 'A copy of the selected evaluation template is ready to edit.'
+              : 'A new blank evaluation template has been created.',
+      });
+    });
+  }
+
+  async function handleSaveEvaluationTemplate(): Promise<void> {
+    if (
+      !runtimeConfig ||
+      authSession?.status !== 'authenticated' ||
+      !selectedEvaluationTemplateId ||
+      !evaluationTemplateDraft
+    ) {
+      return;
+    }
+
+    await runAction(`save-template-${selectedEvaluationTemplateId}`, async () => {
+      const updatedTemplate = await updateEvaluationTemplate(
+        runtimeConfig,
+        authSession.idToken,
+        selectedEvaluationTemplateId,
+        {
+          name: evaluationTemplateDraft.name,
+          criteria: evaluationTemplateDraft.criteria,
+        },
+      );
+      await refreshEvaluationTemplateDirectory(
+        runtimeConfig,
+        authSession.idToken,
+        updatedTemplate.id,
+      );
+      setFeedback({
+        tone: 'success',
+        message: 'Evaluation template changes have been saved.',
+      });
+    });
+  }
+
+  async function handleDeleteSelectedEvaluationTemplate(): Promise<void> {
+    if (
+      !runtimeConfig ||
+      authSession?.status !== 'authenticated' ||
+      !selectedEvaluationTemplateId ||
+      !evaluationTemplates.some((template) => template.id === selectedEvaluationTemplateId)
+    ) {
+      return;
+    }
+
+    const templateToDelete =
+      evaluationTemplates.find((template) => template.id === selectedEvaluationTemplateId) ??
+      null;
+    if (!templateToDelete) return;
+
+    if (
+      !window.confirm(
+        `Delete "${templateToDelete.name}"? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+
+    const fallbackTemplateId =
+      evaluationTemplates.find((template) => template.id !== selectedEvaluationTemplateId)?.id ??
+      null;
+
+    await runAction(`delete-template-${selectedEvaluationTemplateId}`, async () => {
+      await deleteEvaluationTemplate(
+        runtimeConfig,
+        authSession.idToken,
+        selectedEvaluationTemplateId,
+      );
+      await refreshEvaluationTemplateDirectory(
+        runtimeConfig,
+        authSession.idToken,
+        fallbackTemplateId,
+      );
+      setFeedback({
+        tone: 'success',
+        message: 'Evaluation template deleted.',
+      });
+    });
+  }
+
+  async function refreshTryoutSeasonDirectory(
+    currentRuntimeConfig: RuntimeConfig,
+    currentIdToken: string | null,
+    preferredSeasonId?: string | null,
+  ): Promise<void> {
+    const seasons = await loadTryoutSeasons(currentRuntimeConfig, currentIdToken);
+    setTryoutSeasons(seasons);
+    setTryoutSeasonsLoaded(true);
+    setSelectedTryoutSeasonId((currentValue) => {
+      const requestedId =
+        preferredSeasonId === undefined ? currentValue : preferredSeasonId;
+
+      if (requestedId && seasons.some((season) => season.id === requestedId)) {
+        return requestedId;
+      }
+
+      if (currentValue && seasons.some((season) => season.id === currentValue)) {
+        return currentValue;
+      }
+
+      return seasons[0]?.id ?? null;
+    });
+  }
+
+  function applyTryoutDraft(
+    updater: (draft: TryoutSeason) => TryoutSeason,
+  ): void {
+    setTryoutSeasonDraft((currentValue) =>
+      currentValue
+        ? recalculateTryoutSeasonDraft(
+            updater(cloneTryoutSeasonState(currentValue)),
+          )
+        : currentValue,
+    );
+  }
+
+  async function handleCreateTryoutSeason(): Promise<void> {
+    if (!runtimeConfig || authSession?.status !== 'authenticated') return;
+
+    const trimmedName = newTryoutSeasonName.trim();
+    if (!trimmedName) {
+      setFeedback({
+        tone: 'error',
+        message: 'Add a tryout season name before creating it.',
+      });
+      return;
+    }
+
+    await runAction('create-tryout-season', async () => {
+      const createdSeason = await createTryoutSeason(
+        runtimeConfig,
+        authSession.idToken,
+        {
+          name: trimmedName,
+        },
+      );
+      await refreshTryoutSeasonDirectory(
+        runtimeConfig,
+        authSession.idToken,
+        createdSeason.id,
+      );
+      setNewTryoutSeasonName('');
+      setFeedback({
+        tone: 'success',
+        message: 'Tryout season created.',
+      });
+    });
+  }
+
+  async function handleSaveTryoutSeason(): Promise<void> {
+    if (
+      !runtimeConfig ||
+      authSession?.status !== 'authenticated' ||
+      !selectedTryoutSeasonId ||
+      !tryoutSeasonDraft
+    ) {
+      return;
+    }
+
+    await runAction(`save-tryout-season-${selectedTryoutSeasonId}`, async () => {
+      const updatedSeason = await updateTryoutSeason(
+        runtimeConfig,
+        authSession.idToken,
+        selectedTryoutSeasonId,
+        {
+          name: tryoutSeasonDraft.name,
+          groups: tryoutSeasonDraft.groups,
+          teams: tryoutSeasonDraft.teams,
+          sessions: tryoutSeasonDraft.sessions,
+          playerOverrides: tryoutSeasonDraft.playerOverrides,
+        },
+      );
+      await refreshTryoutSeasonDirectory(
+        runtimeConfig,
+        authSession.idToken,
+        updatedSeason.id,
+      );
+      setFeedback({
+        tone: 'success',
+        message: 'Tryout setup changes have been saved.',
+      });
+    });
+  }
+
+  async function handleDeleteSelectedTryoutSeason(): Promise<void> {
+    if (
+      !runtimeConfig ||
+      authSession?.status !== 'authenticated' ||
+      !selectedTryoutSeasonId ||
+      !tryoutSeasons.some((season) => season.id === selectedTryoutSeasonId)
+    ) {
+      return;
+    }
+
+    const seasonToDelete =
+      tryoutSeasons.find((season) => season.id === selectedTryoutSeasonId) ?? null;
+    if (!seasonToDelete) return;
+
+    if (
+      !window.confirm(
+        `Delete "${seasonToDelete.name}"? This removes its groups, teams, and sessions.`,
+      )
+    ) {
+      return;
+    }
+
+    const fallbackSeasonId =
+      tryoutSeasons.find((season) => season.id !== selectedTryoutSeasonId)?.id ?? null;
+
+    await runAction(`delete-tryout-season-${selectedTryoutSeasonId}`, async () => {
+      await deleteTryoutSeason(
+        runtimeConfig,
+        authSession.idToken,
+        selectedTryoutSeasonId,
+      );
+      await refreshTryoutSeasonDirectory(
+        runtimeConfig,
+        authSession.idToken,
+        fallbackSeasonId,
+      );
+      setFeedback({
+        tone: 'success',
+        message: 'Tryout season deleted.',
+      });
+    });
+  }
+
+  function updateTryoutSeasonName(value: string): void {
+    setTryoutSeasonDraft((currentValue) =>
+      currentValue
+        ? {
+            ...currentValue,
+            name: value,
+          }
+        : currentValue,
+    );
+  }
+
+  function addTryoutGroup(): void {
+    applyTryoutDraft((draft) => ({
+      ...draft,
+      groups: [
+        ...draft.groups,
+        {
+          id: crypto.randomUUID(),
+          name: `New group ${draft.groups.length + 1}`,
+          allowedBirthYears: [],
+          allowedGenders: [...TRYOUT_GENDERS],
+        },
+      ],
+    }));
+  }
+
+  function updateTryoutGroupName(groupId: string, value: string): void {
+    applyTryoutDraft((draft) => ({
+      ...draft,
+      groups: draft.groups.map((group) =>
+        group.id === groupId
+          ? {
+              ...group,
+              name: value,
+            }
+          : group,
+      ),
+    }));
+  }
+
+  function toggleTryoutGroupBirthYear(
+    groupId: string,
+    birthYear: string,
+    checked: boolean,
+  ): void {
+    applyTryoutDraft((draft) => ({
+      ...draft,
+      groups: draft.groups.map((group) =>
+        group.id === groupId
+          ? {
+              ...group,
+              allowedBirthYears: sortTryoutBirthYears(
+                checked
+                  ? [...new Set([...group.allowedBirthYears, birthYear])]
+                  : group.allowedBirthYears.filter((entry) => entry !== birthYear),
+              ),
+            }
+          : group,
+      ),
+    }));
+  }
+
+  function toggleTryoutGroupGender(
+    groupId: string,
+    gender: TryoutGender,
+    checked: boolean,
+  ): void {
+    applyTryoutDraft((draft) => ({
+      ...draft,
+      groups: draft.groups.map((group) =>
+        group.id === groupId
+          ? {
+              ...group,
+              allowedGenders: checked
+                ? [...new Set([...group.allowedGenders, gender])]
+                : group.allowedGenders.filter((entry) => entry !== gender),
+            }
+          : group,
+      ),
+    }));
+  }
+
+  function removeTryoutGroup(groupId: string): void {
+    applyTryoutDraft((draft) => {
+      const removedTeamIds = new Set(
+        draft.teams
+          .filter((team) => team.groupId === groupId)
+          .map((team) => team.id),
+      );
+
+      return {
+        ...draft,
+        groups: draft.groups.filter((group) => group.id !== groupId),
+        teams: draft.teams.filter((team) => team.groupId !== groupId),
+        sessions: draft.sessions.map((session) => ({
+          ...session,
+          teamIds: session.teamIds.filter((teamId) => !removedTeamIds.has(teamId)),
+        })),
+        playerOverrides: draft.playerOverrides.map((override) => ({
+          ...override,
+          assignmentMode:
+            override.assignmentMode === 'manual' && override.groupId === groupId
+              ? 'unassigned'
+              : override.assignmentMode,
+          groupId: override.groupId === groupId ? null : override.groupId,
+          teamId:
+            override.teamId && removedTeamIds.has(override.teamId)
+              ? null
+              : override.teamId,
+        })),
+      };
+    });
+  }
+
+  function setTryoutPlayerAssignment(
+    playerId: string,
+    assignmentMode: TryoutPlayerAssignmentMode,
+    groupId: string | null,
+  ): void {
+    applyTryoutDraft((draft) => ({
+      ...draft,
+      playerOverrides: updateTryoutPlayerOverridesState(
+        draft.playerOverrides,
+        playerId,
+        (override) => ({
+          ...override,
+          assignmentMode,
+          groupId: assignmentMode === 'manual' ? groupId : null,
+          teamId:
+            assignmentMode === 'manual' &&
+            groupId &&
+            override.teamId &&
+            draft.teams.some(
+              (team) => team.id === override.teamId && team.groupId === groupId,
+            )
+              ? override.teamId
+              : null,
+        }),
+      ),
+    }));
+  }
+
+  function addTryoutTeam(groupId: string): void {
+    applyTryoutDraft((draft) => {
+      const nextTeamNumber =
+        draft.teams.filter((team) => team.groupId === groupId).length + 1;
+
+      return {
+        ...draft,
+        teams: [
+          ...draft.teams,
+          {
+            id: crypto.randomUUID(),
+            groupId,
+            name: `Team ${nextTeamNumber}`,
+          },
+        ],
+      };
+    });
+  }
+
+  function updateTryoutTeamName(teamId: string, value: string): void {
+    applyTryoutDraft((draft) => ({
+      ...draft,
+      teams: draft.teams.map((team) =>
+        team.id === teamId
+          ? {
+              ...team,
+              name: value,
+            }
+          : team,
+      ),
+    }));
+  }
+
+  function removeTryoutTeam(teamId: string): void {
+    applyTryoutDraft((draft) => ({
+      ...draft,
+      teams: draft.teams.filter((team) => team.id !== teamId),
+      sessions: draft.sessions.map((session) => ({
+        ...session,
+        teamIds: session.teamIds.filter((currentTeamId) => currentTeamId !== teamId),
+      })),
+      playerOverrides: draft.playerOverrides.map((override) => ({
+        ...override,
+        teamId: override.teamId === teamId ? null : override.teamId,
+      })),
+    }));
+  }
+
+  function assignTryoutPlayerToTeam(
+    playerId: string,
+    teamId: string | null,
+  ): void {
+    applyTryoutDraft((draft) => {
+      const player = draft.players.find((entry) => entry.playerId === playerId) ?? null;
+      const nextTeam =
+        teamId ? draft.teams.find((team) => team.id === teamId) ?? null : null;
+
+      if (teamId && (!player || !nextTeam || nextTeam.groupId !== player.effectiveGroupId)) {
+        return draft;
+      }
+
+      return {
+        ...draft,
+        playerOverrides: updateTryoutPlayerOverridesState(
+          draft.playerOverrides,
+          playerId,
+          (override) => ({
+            ...override,
+            teamId,
+          }),
+        ),
+      };
+    });
+  }
+
+  function updateTryoutPlayerJersey(
+    playerId: string,
+    value: string,
+  ): void {
+    applyTryoutDraft((draft) => ({
+      ...draft,
+      playerOverrides: updateTryoutPlayerOverridesState(
+        draft.playerOverrides,
+        playerId,
+        (override) => ({
+          ...override,
+          jerseyNumber: value.trim(),
+        }),
+      ),
+    }));
+  }
+
+  function addTryoutSession(): void {
+    applyTryoutDraft((draft) => ({
+      ...draft,
+      sessions: [
+        ...draft.sessions,
+        {
+          id: crypto.randomUUID(),
+          name: `Session ${draft.sessions.length + 1}`,
+          teamIds: [],
+        },
+      ],
+    }));
+  }
+
+  function updateTryoutSessionName(sessionId: string, value: string): void {
+    applyTryoutDraft((draft) => ({
+      ...draft,
+      sessions: draft.sessions.map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              name: value,
+            }
+          : session,
+      ),
+    }));
+  }
+
+  function toggleTryoutSessionTeam(
+    sessionId: string,
+    teamId: string,
+    checked: boolean,
+  ): void {
+    applyTryoutDraft((draft) => ({
+      ...draft,
+      sessions: draft.sessions.map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              teamIds: checked
+                ? [...new Set([...session.teamIds, teamId])]
+                : session.teamIds.filter((entry) => entry !== teamId),
+            }
+          : session,
+      ),
+    }));
+  }
+
+  function removeTryoutSession(sessionId: string): void {
+    applyTryoutDraft((draft) => ({
+      ...draft,
+      sessions: draft.sessions.filter((session) => session.id !== sessionId),
+    }));
   }
 
   async function handleSavePlayer(nextStatus: IntakeStatus): Promise<void> {
@@ -1097,6 +1987,57 @@ function App() {
     selectedAdminUserId
       ? adminUsers.find((user) => user.userId === selectedAdminUserId) ?? null
       : null;
+  const selectedEvaluationTemplate =
+    selectedEvaluationTemplateId
+      ? evaluationTemplates.find((template) => template.id === selectedEvaluationTemplateId) ??
+        null
+      : null;
+  const evaluationTemplateTotalWeight = evaluationTemplateDraft
+    ? evaluationTemplateDraft.criteria.reduce(
+        (total, criterion) => total + criterion.weight,
+        0,
+      )
+    : 0;
+  const tryoutSetupCard = (
+    <TryoutSetupCard
+      roleLabel={activeWorkspaceTitle}
+      seasons={tryoutSeasons}
+      draft={tryoutSeasonDraft}
+      loaded={tryoutSeasonsLoaded}
+      loading={tryoutSeasonsLoading}
+      newSeasonName={newTryoutSeasonName}
+      busyAction={busyAction}
+      draggingPlayerId={draggingTryoutPlayerId}
+      onNewSeasonNameChange={setNewTryoutSeasonName}
+      onCreateSeason={() => {
+        void handleCreateTryoutSeason();
+      }}
+      onSelectSeason={setSelectedTryoutSeasonId}
+      onDeleteSeason={() => {
+        void handleDeleteSelectedTryoutSeason();
+      }}
+      onSeasonNameChange={updateTryoutSeasonName}
+      onSaveSeason={() => {
+        void handleSaveTryoutSeason();
+      }}
+      onAddGroup={addTryoutGroup}
+      onUpdateGroupName={updateTryoutGroupName}
+      onToggleGroupBirthYear={toggleTryoutGroupBirthYear}
+      onToggleGroupGender={toggleTryoutGroupGender}
+      onRemoveGroup={removeTryoutGroup}
+      onSetPlayerAssignment={setTryoutPlayerAssignment}
+      onAddTeam={addTryoutTeam}
+      onUpdateTeamName={updateTryoutTeamName}
+      onRemoveTeam={removeTryoutTeam}
+      onAssignPlayerToTeam={assignTryoutPlayerToTeam}
+      onUpdatePlayerJersey={updateTryoutPlayerJersey}
+      onAddSession={addTryoutSession}
+      onUpdateSessionName={updateTryoutSessionName}
+      onToggleSessionTeam={toggleTryoutSessionTeam}
+      onRemoveSession={removeTryoutSession}
+      onStartPlayerDrag={setDraggingTryoutPlayerId}
+    />
+  );
   const userProfileCard = userDraft ? (
     <UserProfileCard
       signInEmail={bootstrap.user.email}
@@ -1442,7 +2383,7 @@ function App() {
             </div>
           </section>
         ) : isAdminWorkspace ? (
-          <section className="workspace-grid">
+          <section className="workspace-grid workspace-grid--single">
             <div className="workspace-main">
               <article className="card">
                 <div className="card-header">
@@ -1451,7 +2392,8 @@ function App() {
                     <h2>Organization operations</h2>
                     <p className="section-copy">
                       Move between club overview, organization configuration,
-                      and user management from one responsive admin shell.
+                      evaluation templates, user management, and occasional
+                      account tools from one vertical admin shell.
                     </p>
                   </div>
                   <span className="status-chip">
@@ -1463,7 +2405,12 @@ function App() {
                   {([
                     ['overview', 'Overview'],
                     ['organization', 'Organization'],
+                    ['tryouts', 'Tryouts'],
+                    ['templates', 'Evaluations'],
                     ['users', 'Users'],
+                    ['profile', 'My Profile'],
+                    ['access', 'Access'],
+                    ['architecture', 'Architecture'],
                   ] as Array<[AdminWorkspaceView, string]>).map(([view, label]) => (
                     <button
                       key={view}
@@ -1504,21 +2451,21 @@ function App() {
                     </div>
                     <div className="stack-card">
                       <div>
-                        <strong>Shared login still stays intact</strong>
+                        <strong>Evaluation templates are live</strong>
                         <p>
-                          The same sign-in can support family and staff
-                          workspaces, while organization access remains scoped
-                          under the hood for future multi-club growth.
+                          Club admins can now build weighted score sheets with
+                          editable 1, 3, and 5 observable anchors, then copy
+                          them forward as tryout needs change by age group.
                         </p>
                       </div>
                     </div>
                     <div className="stack-card">
                       <div>
-                        <strong>Next operational slice</strong>
+                        <strong>Shared login still stays intact</strong>
                         <p>
-                          This foundation is ready for tryout setup,
-                          evaluation workflows, and more staff tools on top of
-                          the same access model.
+                          The same sign-in can support family and staff
+                          workspaces, while organization access remains scoped
+                          under the hood for future multi-club growth.
                         </p>
                       </div>
                     </div>
@@ -1741,6 +2688,363 @@ function App() {
                   </>
                 ) : null}
 
+                {activeAdminSection === 'tryouts' ? tryoutSetupCard : null}
+
+                {activeAdminSection === 'templates' ? (
+                  <div className="admin-templates-layout">
+                    <article className="card">
+                      <div className="card-header">
+                        <div>
+                          <p className="section-eyebrow">Evaluation Templates</p>
+                          <h3>Score sheet library</h3>
+                          <p className="section-copy">
+                            Create club-managed templates, start from the
+                            default criteria set, or copy an existing sheet
+                            before tuning the weights and observable anchors.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="action-row">
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => {
+                            void handleCreateEvaluationTemplate('blank');
+                          }}
+                          disabled={busyAction === 'create-template-blank'}
+                        >
+                          {busyAction === 'create-template-blank'
+                            ? 'Creating...'
+                            : 'New blank template'}
+                        </button>
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => {
+                            void handleCreateEvaluationTemplate('default');
+                          }}
+                          disabled={busyAction === 'create-template-default'}
+                        >
+                          {busyAction === 'create-template-default'
+                            ? 'Loading defaults...'
+                            : 'Load defaults'}
+                        </button>
+                      </div>
+
+                      <div className="stack-list template-list">
+                        {!evaluationTemplatesLoaded && evaluationTemplatesLoading ? (
+                          <div className="empty-state-card">
+                            <strong>Loading evaluation templates...</strong>
+                            <p>
+                              Pulling the current score sheet library from the
+                              organization settings.
+                            </p>
+                          </div>
+                        ) : evaluationTemplates.length === 0 ? (
+                          <div className="empty-state-card">
+                            <strong>No templates created yet</strong>
+                            <p>
+                              Start with a blank template or load the default
+                              criteria as a quick starting point.
+                            </p>
+                          </div>
+                        ) : (
+                          evaluationTemplates.map((template) => (
+                            <button
+                              key={template.id}
+                              className={`template-list-item ${
+                                template.id === selectedEvaluationTemplateId
+                                  ? 'template-list-item--active'
+                                  : ''
+                              }`}
+                              type="button"
+                              onClick={() => {
+                                setSelectedEvaluationTemplateId(template.id);
+                              }}
+                            >
+                              <div className="template-list-item__content">
+                                <strong>{template.name}</strong>
+                                <p>
+                                  {template.criteria.length} criteria - updated{' '}
+                                  {formatTimestamp(template.updatedAt)}
+                                </p>
+                              </div>
+                              <span className="status-chip">
+                                {template.criteria.reduce(
+                                  (total, criterion) => total + criterion.weight,
+                                  0,
+                                )}{' '}
+                                total weight
+                              </span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </article>
+
+                    <article className="card">
+                      <div className="card-header">
+                        <div>
+                          <p className="section-eyebrow">Template Editor</p>
+                          <h3>
+                            {evaluationTemplateDraft?.name ||
+                              selectedEvaluationTemplate?.name ||
+                              'Choose a template'}
+                          </h3>
+                          <p className="section-copy">
+                            Every criterion scores from 1 to 5. The written 1,
+                            3, and 5 anchors help evaluators normalize what
+                            each score means; 2 and 4 sit between those anchor
+                            descriptions.
+                          </p>
+                        </div>
+                        {selectedEvaluationTemplate ? (
+                          <span className="status-chip">
+                            {evaluationTemplateDraft?.criteria.length ??
+                              selectedEvaluationTemplate.criteria.length}{' '}
+                            criteria
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {selectedEvaluationTemplate && evaluationTemplateDraft ? (
+                        <>
+                          <div className="action-row">
+                            <button
+                              className="secondary-button"
+                              type="button"
+                              onClick={() => {
+                                void handleCreateEvaluationTemplate('copy');
+                              }}
+                              disabled={busyAction === 'create-template-copy'}
+                            >
+                              {busyAction === 'create-template-copy'
+                                ? 'Copying...'
+                                : 'Copy template'}
+                            </button>
+                            <button
+                              className="ghost-button"
+                              type="button"
+                              onClick={() => {
+                                void handleDeleteSelectedEvaluationTemplate();
+                              }}
+                              disabled={
+                                busyAction ===
+                                `delete-template-${selectedEvaluationTemplate.id}`
+                              }
+                            >
+                              {busyAction ===
+                              `delete-template-${selectedEvaluationTemplate.id}`
+                                ? 'Deleting...'
+                                : 'Delete template'}
+                            </button>
+                          </div>
+
+                          <div className="stack-list template-guidance">
+                            <div className="stack-card">
+                              <div>
+                                <strong>Weights are 1 to 100 per criterion</strong>
+                                <p>
+                                  Use higher weights for criteria that matter
+                                  more at a given age or in a specific
+                                  evaluation context. Current total weight:{' '}
+                                  {evaluationTemplateTotalWeight}.
+                                </p>
+                              </div>
+                            </div>
+                            <div className="stack-card">
+                              <div>
+                                <strong>Default templates start balanced</strong>
+                                <p>
+                                  Loading defaults starts every criterion at
+                                  weight 50 so the staff can rebalance from an
+                                  even baseline instead of starting from zero.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="form-section">
+                            <h3>Template details</h3>
+                            <div className="field-grid">
+                              <label className="field">
+                                <span>Template name</span>
+                                <input
+                                  type="text"
+                                  value={evaluationTemplateDraft.name}
+                                  onChange={(event) => {
+                                    updateEvaluationTemplateName(
+                                      event.target.value,
+                                    );
+                                  }}
+                                  placeholder="Example: 2013-14U skater tryouts"
+                                />
+                              </label>
+                            </div>
+                          </div>
+
+                          <div className="form-section">
+                            <div className="team-history-header">
+                              <div>
+                                <h3>Criteria and score anchors</h3>
+                                <p className="helper-copy">
+                                  Keep each criterion and its 1, 3, and 5
+                                  anchor descriptions clear enough that
+                                  different evaluators can interpret them the
+                                  same way.
+                                </p>
+                              </div>
+                              <button
+                                className="secondary-button"
+                                type="button"
+                                onClick={addEvaluationCriterion}
+                              >
+                                Add criterion
+                              </button>
+                            </div>
+
+                            <div className="criteria-list">
+                              {evaluationTemplateDraft.criteria.map(
+                                (criterion, index) => (
+                                  <div key={criterion.id} className="criterion-card">
+                                    <div className="criterion-card__header">
+                                      <div>
+                                        <p className="section-eyebrow">
+                                          Criterion {index + 1}
+                                        </p>
+                                        <h3>{criterion.title}</h3>
+                                      </div>
+                                      <button
+                                        className="ghost-button"
+                                        type="button"
+                                        onClick={() => {
+                                          removeEvaluationCriterion(criterion.id);
+                                        }}
+                                        disabled={
+                                          evaluationTemplateDraft.criteria.length === 1
+                                        }
+                                      >
+                                        Remove
+                                      </button>
+                                    </div>
+
+                                    <div className="criterion-settings-grid">
+                                      <label className="field">
+                                        <span>Criterion name</span>
+                                        <input
+                                          type="text"
+                                          value={criterion.title}
+                                          onChange={(event) => {
+                                            updateEvaluationCriterionField(
+                                              criterion.id,
+                                              'title',
+                                              event.target.value,
+                                            );
+                                          }}
+                                        />
+                                      </label>
+
+                                      <label className="field">
+                                        <span>Weight (1-100)</span>
+                                        <input
+                                          type="number"
+                                          min={1}
+                                          max={100}
+                                          value={criterion.weight}
+                                          onChange={(event) => {
+                                            updateEvaluationCriterionWeight(
+                                              criterion.id,
+                                              event.target.value,
+                                            );
+                                          }}
+                                        />
+                                      </label>
+                                    </div>
+
+                                    <div className="criterion-anchor-grid">
+                                      <label className="field">
+                                        <span>Score 1 anchor</span>
+                                        <textarea
+                                          value={criterion.score1Description}
+                                          onChange={(event) => {
+                                            updateEvaluationCriterionField(
+                                              criterion.id,
+                                              'score1Description',
+                                              event.target.value,
+                                            );
+                                          }}
+                                        />
+                                      </label>
+
+                                      <label className="field">
+                                        <span>Score 3 anchor</span>
+                                        <textarea
+                                          value={criterion.score3Description}
+                                          onChange={(event) => {
+                                            updateEvaluationCriterionField(
+                                              criterion.id,
+                                              'score3Description',
+                                              event.target.value,
+                                            );
+                                          }}
+                                        />
+                                      </label>
+
+                                      <label className="field">
+                                        <span>Score 5 anchor</span>
+                                        <textarea
+                                          value={criterion.score5Description}
+                                          onChange={(event) => {
+                                            updateEvaluationCriterionField(
+                                              criterion.id,
+                                              'score5Description',
+                                              event.target.value,
+                                            );
+                                          }}
+                                        />
+                                      </label>
+                                    </div>
+                                  </div>
+                                ),
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="footer-note">
+                            <div className="action-row">
+                              <button
+                                className="primary-button"
+                                type="button"
+                                onClick={() => {
+                                  void handleSaveEvaluationTemplate();
+                                }}
+                                disabled={
+                                  busyAction ===
+                                  `save-template-${selectedEvaluationTemplate.id}`
+                                }
+                              >
+                                {busyAction ===
+                                `save-template-${selectedEvaluationTemplate.id}`
+                                  ? 'Saving template...'
+                                  : 'Save template'}
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="empty-state-card">
+                          <strong>No template selected</strong>
+                          <p>
+                            Choose a template from the library or create a new
+                            one to start defining weighted evaluation criteria.
+                          </p>
+                        </div>
+                      )}
+                    </article>
+                  </div>
+                ) : null}
+
                 {activeAdminSection === 'users' ? (
                   <div className="admin-users-layout">
                     <div className="form-section">
@@ -1955,292 +3259,239 @@ function App() {
               </article>
             </div>
 
-            <div className="workspace-sidebar">
-              {activeAdminSection === 'users' ? (
-                <article className="card">
-                  <div className="card-header">
-                    <div>
-                      <p className="section-eyebrow">User Access</p>
-                      <h3>
-                        {selectedAdminUser
-                          ? getDirectoryUserName(selectedAdminUser)
-                          : 'Select a user'}
-                      </h3>
-                      <p className="section-copy">
-                        {selectedAdminUser
-                          ? selectedAdminUser.email
-                          : 'Choose a user from the directory to review or update access.'}
-                      </p>
-                    </div>
-                    {selectedAdminUser ? (
-                      <span
-                        className={`status-chip ${
-                          selectedAdminUser.accountStatus === 'DISABLED'
-                            ? 'status-chip--warning'
-                            : ''
-                        }`}
-                      >
-                        {formatAccountStatus(selectedAdminUser.accountStatus)}
-                      </span>
-                    ) : null}
+            {activeAdminSection === 'users' ? (
+              <article className="card">
+                <div className="card-header">
+                  <div>
+                    <p className="section-eyebrow">User Access</p>
+                    <h3>
+                      {selectedAdminUser
+                        ? getDirectoryUserName(selectedAdminUser)
+                        : 'Select a user'}
+                    </h3>
+                    <p className="section-copy">
+                      {selectedAdminUser
+                        ? selectedAdminUser.email
+                        : 'Choose a user from the directory to review or update access.'}
+                    </p>
                   </div>
+                  {selectedAdminUser ? (
+                    <span
+                      className={`status-chip ${
+                        selectedAdminUser.accountStatus === 'DISABLED'
+                          ? 'status-chip--warning'
+                          : ''
+                      }`}
+                    >
+                      {formatAccountStatus(selectedAdminUser.accountStatus)}
+                    </span>
+                  ) : null}
+                </div>
 
-                  {selectedAdminUser && adminUserDraft ? (
-                    <>
-                      <div className="form-section">
-                        <h3>Account type</h3>
-                        <label className="field">
-                          <span>Primary role</span>
-                          <select
-                            value={adminUserDraft.primaryRole}
-                            onChange={(event) => {
-                              setAdminUserDraft((currentValue) =>
-                                currentValue
-                                  ? {
-                                      ...currentValue,
-                                      primaryRole: event.target.value as PrimaryRole,
-                                    }
-                                  : currentValue,
-                              );
-                            }}
-                          >
-                            <option value="parent">Parent</option>
-                            <option value="player">Player</option>
-                            <option value="staff">Staff</option>
-                          </select>
-                        </label>
-                        <p className="helper-copy">
-                          Use this when a user selected the wrong starting role
-                          during first login.
-                        </p>
-                      </div>
-
-                      <div className="form-section">
-                        <h3>Organization access</h3>
-                        <label className="checkbox-field">
-                          <input
-                            type="checkbox"
-                            checked={adminUserDraft.organizationRoles.includes('club-admin')}
-                            onChange={(event) => {
-                              setAdminUserDraft((currentValue) =>
-                                currentValue
-                                  ? {
-                                      ...currentValue,
-                                      organizationRoles: toggleOrganizationRole(
-                                        currentValue.organizationRoles,
-                                        'club-admin',
-                                        event.target.checked,
-                                      ),
-                                    }
-                                  : currentValue,
-                              );
-                            }}
-                          />
-                          <div>
-                            <strong>Organization Admin</strong>
-                            <p className="helper-copy">
-                              Grants club settings and user-management access.
-                            </p>
-                          </div>
-                        </label>
-
-                        <label className="checkbox-field">
-                          <input
-                            type="checkbox"
-                            checked={adminUserDraft.organizationRoles.includes('coach')}
-                            onChange={(event) => {
-                              setAdminUserDraft((currentValue) =>
-                                currentValue
-                                  ? {
-                                      ...currentValue,
-                                      organizationRoles: toggleOrganizationRole(
-                                        currentValue.organizationRoles,
-                                        'coach',
-                                        event.target.checked,
-                                      ),
-                                    }
-                                  : currentValue,
-                              );
-                            }}
-                          />
-                          <div>
-                            <strong>Coach</strong>
-                            <p className="helper-copy">
-                              Prepares the account for coach-specific staff
-                              workflows as they come online.
-                            </p>
-                          </div>
-                        </label>
-                      </div>
-
-                      <div className="form-section">
-                        <h3>Account status</h3>
-                        <label className="field">
-                          <span>Status</span>
-                          <select
-                            value={adminUserDraft.accountStatus}
-                            onChange={(event) => {
-                              setAdminUserDraft((currentValue) =>
-                                currentValue
-                                  ? {
-                                      ...currentValue,
-                                      accountStatus: event.target.value as AccountStatus,
-                                    }
-                                  : currentValue,
-                              );
-                            }}
-                          >
-                            <option value="ACTIVE">Active</option>
-                            <option value="DISABLED">Disabled</option>
-                          </select>
-                        </label>
-                        <p className="helper-copy">
-                          Disabled users can still authenticate, but the portal
-                          blocks all non-bootstrap actions until re-enabled.
-                        </p>
-                      </div>
-
-                      <div className="stack-list">
-                        <div className="stack-card">
-                          <div>
-                            <strong>Contact details</strong>
-                            <p>
-                              {selectedAdminUser.contactEmail || 'No contact email added yet'}
-                              {selectedAdminUser.phoneNumber
-                                ? ` - ${selectedAdminUser.phoneNumber}`
-                                : ''}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="stack-card">
-                          <div>
-                            <strong>Profile activity</strong>
-                            <p>
-                              Created {formatTimestamp(selectedAdminUser.createdAt)}.
-                              Updated {formatTimestamp(selectedAdminUser.updatedAt)}.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="footer-note">
-                        <button
-                          className="primary-button"
-                          type="button"
-                          onClick={() => {
-                            void handleSaveAdminUser();
+                {selectedAdminUser && adminUserDraft ? (
+                  <>
+                    <div className="form-section">
+                      <h3>Account type</h3>
+                      <label className="field">
+                        <span>Primary role</span>
+                        <select
+                          value={adminUserDraft.primaryRole}
+                          onChange={(event) => {
+                            setAdminUserDraft((currentValue) =>
+                              currentValue
+                                ? {
+                                    ...currentValue,
+                                    primaryRole: event.target.value as PrimaryRole,
+                                  }
+                                : currentValue,
+                            );
                           }}
-                          disabled={busyAction === `save-admin-user-${selectedAdminUser.userId}`}
                         >
-                          {busyAction === `save-admin-user-${selectedAdminUser.userId}`
-                            ? 'Saving user access...'
-                            : 'Save user access'}
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="empty-state-card">
-                      <strong>No user selected</strong>
-                      <p>
-                        Pick a user from the list to change their account type,
-                        organization access, or account status.
+                          <option value="parent">Parent</option>
+                          <option value="player">Player</option>
+                          <option value="staff">Staff</option>
+                        </select>
+                      </label>
+                      <p className="helper-copy">
+                        Use this when a user selected the wrong starting role
+                        during first login.
                       </p>
                     </div>
-                  )}
-                </article>
-              ) : (
-                <>
-                  {userProfileCard}
 
-                  <article className="card">
-                    <div className="sidebar-header">
-                      <div>
-                        <p className="section-eyebrow">Current Access</p>
-                        <h3>Available workspaces</h3>
-                      </div>
-                    </div>
-                    <div className="stack-list">
-                      {bootstrap.access.organizations.map((organizationAccess) => (
-                        <div
-                          key={organizationAccess.organizationId}
-                          className={`stack-card ${
-                            organizationAccess.organizationId ===
-                            bootstrap.access.activeOrganizationId
-                              ? 'stack-card--highlight'
-                              : ''
-                          }`}
-                        >
-                          <div>
-                            <strong>{organizationAccess.name}</strong>
-                            <p>
-                              {organizationAccess.roles.length > 0
-                                ? organizationAccess.roles
-                                    .map((role) => ROLE_LABELS[role])
-                                    .join(', ')
-                                : 'No assigned roles yet'}
-                            </p>
-                          </div>
+                    <div className="form-section">
+                      <h3>Organization access</h3>
+                      <label className="checkbox-field">
+                        <input
+                          type="checkbox"
+                          checked={adminUserDraft.organizationRoles.includes('club-admin')}
+                          onChange={(event) => {
+                            setAdminUserDraft((currentValue) =>
+                              currentValue
+                                ? {
+                                    ...currentValue,
+                                    organizationRoles: toggleOrganizationRole(
+                                      currentValue.organizationRoles,
+                                      'club-admin',
+                                      event.target.checked,
+                                    ),
+                                  }
+                                : currentValue,
+                            );
+                          }}
+                        />
+                        <div>
+                          <strong>Organization Admin</strong>
+                          <p className="helper-copy">
+                            Grants club settings and user-management access.
+                          </p>
                         </div>
-                      ))}
+                      </label>
 
-                      {availableRoles.map((role) => (
-                        <button
-                          key={role}
-                          className={`role-card ${
-                            role === activeRole ? 'option-card--selected' : ''
-                          }`}
-                          type="button"
-                          onClick={() => {
-                            setActiveRole(role);
+                      <label className="checkbox-field">
+                        <input
+                          type="checkbox"
+                          checked={adminUserDraft.organizationRoles.includes('coach')}
+                          onChange={(event) => {
+                            setAdminUserDraft((currentValue) =>
+                              currentValue
+                                ? {
+                                    ...currentValue,
+                                    organizationRoles: toggleOrganizationRole(
+                                      currentValue.organizationRoles,
+                                      'coach',
+                                      event.target.checked,
+                                    ),
+                                  }
+                                : currentValue,
+                            );
+                          }}
+                        />
+                        <div>
+                          <strong>Coach</strong>
+                          <p className="helper-copy">
+                            Prepares the account for coach-specific staff
+                            workflows as they come online.
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+
+                    <div className="form-section">
+                      <h3>Account status</h3>
+                      <label className="field">
+                        <span>Status</span>
+                        <select
+                          value={adminUserDraft.accountStatus}
+                          onChange={(event) => {
+                            setAdminUserDraft((currentValue) =>
+                              currentValue
+                                ? {
+                                    ...currentValue,
+                                    accountStatus: event.target.value as AccountStatus,
+                                  }
+                                : currentValue,
+                            );
                           }}
                         >
-                          <strong>{ROLE_LABELS[role]}</strong>
-                          <span>
-                            {role === activeRole
-                              ? 'Currently active in this session.'
-                              : 'Switch to this workspace.'}
-                          </span>
-                        </button>
-                      ))}
+                          <option value="ACTIVE">Active</option>
+                          <option value="DISABLED">Disabled</option>
+                        </select>
+                      </label>
+                      <p className="helper-copy">
+                        Disabled users can still authenticate, but the portal
+                        blocks all non-bootstrap actions until re-enabled.
+                      </p>
                     </div>
-                  </article>
 
-                  <article className="card">
-                    <div className="sidebar-header">
-                      <div>
-                        <p className="section-eyebrow">Architecture Direction</p>
-                        <h3>Shared login, org-aware access</h3>
-                      </div>
-                    </div>
                     <div className="stack-list">
                       <div className="stack-card">
                         <div>
-                          <strong>What is live now</strong>
+                          <strong>Contact details</strong>
                           <p>
-                            Organization settings and staff-side user access are
-                            now persisted, and access data already carries
-                            organization membership details.
+                            {selectedAdminUser.contactEmail || 'No contact email added yet'}
+                            {selectedAdminUser.phoneNumber
+                              ? ` - ${selectedAdminUser.phoneNumber}`
+                              : ''}
                           </p>
                         </div>
                       </div>
                       <div className="stack-card">
                         <div>
-                          <strong>What this enables next</strong>
+                          <strong>Profile activity</strong>
                           <p>
-                            The same user pool can later support parents or
-                            staff linked to multiple clubs, with an
-                            organization-choice step at sign-in if needed.
+                            Created {formatTimestamp(selectedAdminUser.createdAt)}.
+                            Updated {formatTimestamp(selectedAdminUser.updatedAt)}.
                           </p>
                         </div>
                       </div>
                     </div>
-                  </article>
-                </>
-              )}
-            </div>
+
+                    <div className="footer-note">
+                      <button
+                        className="primary-button"
+                        type="button"
+                        onClick={() => {
+                          void handleSaveAdminUser();
+                        }}
+                        disabled={busyAction === `save-admin-user-${selectedAdminUser.userId}`}
+                      >
+                        {busyAction === `save-admin-user-${selectedAdminUser.userId}`
+                          ? 'Saving user access...'
+                          : 'Save user access'}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="empty-state-card">
+                    <strong>No user selected</strong>
+                    <p>
+                      Pick a user from the list to change their account type,
+                      organization access, or account status.
+                    </p>
+                  </div>
+                )}
+              </article>
+            ) : null}
+
+            {activeAdminSection === 'profile' ? userProfileCard : null}
+
+            {activeAdminSection === 'access' ? workspaceAccessCard : null}
+
+            {activeAdminSection === 'architecture' ? (
+              <article className="card">
+                <div className="sidebar-header">
+                  <div>
+                    <p className="section-eyebrow">Architecture Direction</p>
+                    <h3>Shared login, org-aware access</h3>
+                  </div>
+                </div>
+                <div className="stack-list">
+                  <div className="stack-card">
+                    <div>
+                      <strong>What is live now</strong>
+                      <p>
+                        Organization settings, evaluation templates, and
+                        staff-side user access are persisted, and access data
+                        already carries organization membership details.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="stack-card">
+                    <div>
+                      <strong>What this enables next</strong>
+                      <p>
+                        The same user pool can later support parents or staff
+                        linked to multiple clubs, with an organization-choice
+                        step at sign-in if needed.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            ) : null}
           </section>
         ) : activeRole === 'staff' ? (
-          <section className="workspace-grid">
+          <section className="workspace-grid workspace-grid--single">
             <div className="workspace-main">
               <article className="card">
                 <div className="card-header">
@@ -2248,12 +3499,12 @@ function App() {
                     <p className="section-eyebrow">Staff Workspace</p>
                     <h2>Navigate your staff functions</h2>
                     <p className="section-copy">
-                      Staff accounts can move between workspace overview and
-                      personal profile settings without leaving the main portal
-                      flow.
+                      Staff accounts can manage tryout planning, review their
+                      current access, and keep their own profile current from
+                      one vertical workspace shell.
                     </p>
                   </div>
-                  <span className="status-chip">Awaiting assignment</span>
+                  <span className="status-chip">Staff</span>
                 </div>
 
                 <div className="admin-nav">
@@ -2281,32 +3532,34 @@ function App() {
                   <div className="card-header">
                     <div>
                       <p className="section-eyebrow">Staff Workspace</p>
-                      <h2>Staff access is waiting on club assignment</h2>
+                      <h2>Staff can plan tryouts from this workspace</h2>
                       <p className="section-copy">
-                        This account is registered as staff. Once a club admin
-                        assigns coach or organization-admin access, those
-                        workspaces will appear in the account menu.
+                        Staff accounts can set up tryout seasons, groups,
+                        teams, and sessions here. Additional coach or admin
+                        roles still expand the account menu as those functions
+                        come online.
                       </p>
                     </div>
-                    <span className="status-chip">Awaiting assignment</span>
+                    <span className="status-chip">Live</span>
                   </div>
 
                   <div className="stack-list">
                     <div className="stack-card">
                       <div>
-                        <strong>What you can do now</strong>
+                        <strong>What is ready now</strong>
                         <p>
-                          Keep your name and contact details current so staff
-                          communications can work cleanly from day one.
+                          Build the structure coaches need before evaluations:
+                          seasons, groups, teams, jersey numbers, and sessions.
                         </p>
                       </div>
                     </div>
                     <div className="stack-card">
                       <div>
-                        <strong>What unlocks next</strong>
+                        <strong>What still expands later</strong>
                         <p>
-                          Club-admin assignment will enable coach, manager, or
-                          organization-admin tools without creating a new login.
+                          Club-admin assignment still controls organization
+                          settings and user management without creating a new
+                          login.
                         </p>
                       </div>
                     </div>
@@ -2314,13 +3567,13 @@ function App() {
                 </article>
               ) : null}
 
+              {activeUserSection === 'tryouts' ? tryoutSetupCard : null}
               {activeUserSection === 'profile' ? userProfileCard : null}
+              {workspaceAccessCard}
             </div>
-
-            <div className="workspace-sidebar">{workspaceAccessCard}</div>
           </section>
         ) : activeRole === 'coach' || activeRole === 'manager' ? (
-          <section className="workspace-grid">
+          <section className="workspace-grid workspace-grid--single">
             <div className="workspace-main">
               <article className="card">
                 <div className="card-header">
@@ -2328,8 +3581,8 @@ function App() {
                     <p className="section-eyebrow">Staff Workspace</p>
                     <h2>Navigate your {ROLE_LABELS[activeRole].toLowerCase()} workspace</h2>
                     <p className="section-copy">
-                      Role-based navigation now works here too, even though the
-                      coach and manager operational tools are still coming next.
+                      Tryout setup is live here now, alongside your profile and
+                      current access details.
                     </p>
                   </div>
                   <span className="status-chip">{ROLE_LABELS[activeRole]}</span>
@@ -2360,24 +3613,23 @@ function App() {
                   <div className="card-header">
                     <div>
                       <p className="section-eyebrow">Staff Workspace</p>
-                      <h2>{ROLE_LABELS[activeRole]} tools are not enabled yet</h2>
+                      <h2>{ROLE_LABELS[activeRole]} tryout planning is live</h2>
                       <p className="section-copy">
-                        This account can hold the role, and the portal shell now
-                        supports switching into it, but no coach or manager
-                        workflow has been activated in this build yet.
+                        Use this workspace to build the tryout structure that
+                        feeds future on-ice evaluation workflows.
                       </p>
                     </div>
                   </div>
                 </article>
               ) : null}
 
+              {activeUserSection === 'tryouts' ? tryoutSetupCard : null}
               {activeUserSection === 'profile' ? userProfileCard : null}
+              {workspaceAccessCard}
             </div>
-
-            <div className="workspace-sidebar">{workspaceAccessCard}</div>
           </section>
         ) : (
-          <section className="workspace-grid">
+          <section className="workspace-grid workspace-grid--single">
             <div className="workspace-main">
               <article className="card">
                 <div className="card-header">
@@ -2462,6 +3714,82 @@ function App() {
               ) : null}
 
               {activeUserSection === 'profile' ? userProfileCard : null}
+
+              {familyRole ? (
+                <article className="card">
+                  <div className="sidebar-header">
+                    <div>
+                      <p className="section-eyebrow">Players</p>
+                      <h3>
+                        {familyRole === 'parent'
+                          ? 'Your player records'
+                          : 'Your player profile'}
+                      </h3>
+                    </div>
+                    {familyRole === 'parent' ? (
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => {
+                          setSelectedPlayerId('new');
+                        }}
+                      >
+                        Add player
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="stack-list">
+                    {bootstrap.players.map((player) => (
+                      <button
+                        key={player.id}
+                        className={`player-list-item ${
+                          player.id === selectedPlayerId
+                            ? 'player-list-item--active'
+                            : ''
+                        }`}
+                        type="button"
+                        onClick={() => {
+                          setSelectedPlayerId(player.id);
+                        }}
+                      >
+                        <div>
+                          <strong>{getPlayerDisplayName(player.profile)}</strong>
+                          <span>{buildPlayerListSummary(player)}</span>
+                        </div>
+                        <span className="status-chip">
+                          {ROLE_LABELS[player.relationship]}
+                        </span>
+                      </button>
+                    ))}
+
+                    {bootstrap.players.length === 0 ? (
+                      <div className="stack-card">
+                        <div>
+                          <strong>No player record yet</strong>
+                          <p>
+                            {familyRole === 'parent'
+                              ? 'Add your first player to start the intake process.'
+                              : 'Create your player profile to start the intake process.'}
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {familyRole === 'parent' && selectedPlayerId === 'new' ? (
+                      <div className="stack-card stack-card--highlight">
+                        <div>
+                          <strong>New player draft</strong>
+                          <p>
+                            Complete the player profile, then save a draft or
+                            submit the intake form.
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </article>
+              ) : null}
 
               {familyRole && draftPlayer && activeUserSection === 'player' ? (
                   <article className="card">
@@ -3085,87 +4413,6 @@ function App() {
                   </div>
                 </article>
               ) : null}
-            </div>
-
-            <div className="workspace-sidebar">
-              {familyRole ? (
-                <article className="card">
-                  <div className="sidebar-header">
-                    <div>
-                      <p className="section-eyebrow">Players</p>
-                      <h3>
-                        {familyRole === 'parent'
-                          ? 'Your player records'
-                          : 'Your player profile'}
-                      </h3>
-                    </div>
-                    {familyRole === 'parent' ? (
-                      <button
-                        className="secondary-button"
-                        type="button"
-                        onClick={() => {
-                          setSelectedPlayerId('new');
-                        }}
-                      >
-                        Add player
-                      </button>
-                    ) : null}
-                  </div>
-
-                  <div className="stack-list">
-                    {bootstrap.players.map((player) => (
-                      <button
-                        key={player.id}
-                        className={`player-list-item ${
-                          player.id === selectedPlayerId
-                            ? 'player-list-item--active'
-                            : ''
-                        }`}
-                        type="button"
-                        onClick={() => {
-                          setSelectedPlayerId(player.id);
-                        }}
-                      >
-                        <div>
-                          <strong>{getPlayerDisplayName(player.profile)}</strong>
-                          <span>
-                            {buildPlayerListSummary(player)}
-                          </span>
-                        </div>
-                        <span className="status-chip">
-                          {ROLE_LABELS[player.relationship]}
-                        </span>
-                      </button>
-                    ))}
-
-                    {bootstrap.players.length === 0 ? (
-                      <div className="stack-card">
-                        <div>
-                          <strong>No player record yet</strong>
-                          <p>
-                            {familyRole === 'parent'
-                              ? 'Add your first player to start the intake process.'
-                              : 'Create your player profile to start the intake process.'}
-                          </p>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {familyRole === 'parent' && selectedPlayerId === 'new' ? (
-                      <div className="stack-card stack-card--highlight">
-                        <div>
-                          <strong>New player draft</strong>
-                          <p>
-                            Complete the player profile, then save a draft or
-                            submit the intake form.
-                          </p>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                </article>
-              ) : null}
-
               {familyRole && activeUserSection === 'invites' ? (
                 <article className="card">
                   <div className="sidebar-header">
@@ -3482,6 +4729,710 @@ function UserProfileCard({
   );
 }
 
+function TryoutSetupCard({
+  roleLabel,
+  seasons,
+  draft,
+  loaded,
+  loading,
+  newSeasonName,
+  busyAction,
+  draggingPlayerId,
+  onNewSeasonNameChange,
+  onCreateSeason,
+  onSelectSeason,
+  onDeleteSeason,
+  onSeasonNameChange,
+  onSaveSeason,
+  onAddGroup,
+  onUpdateGroupName,
+  onToggleGroupBirthYear,
+  onToggleGroupGender,
+  onRemoveGroup,
+  onSetPlayerAssignment,
+  onAddTeam,
+  onUpdateTeamName,
+  onRemoveTeam,
+  onAssignPlayerToTeam,
+  onUpdatePlayerJersey,
+  onAddSession,
+  onUpdateSessionName,
+  onToggleSessionTeam,
+  onRemoveSession,
+  onStartPlayerDrag,
+}: TryoutSetupCardProps) {
+  const birthYearOptions = buildTryoutBirthYearOptions(draft?.players ?? []);
+  const groups = draft?.groups ?? [];
+  const teams = draft?.teams ?? [];
+  const sessions = draft?.sessions ?? [];
+  const unassignedPlayers = draft
+    ? draft.players.filter((player) => player.effectiveGroupId === null)
+    : [];
+
+  function handleAssignmentChange(
+    playerId: string,
+    value: string,
+  ): void {
+    if (value === 'default') {
+      onSetPlayerAssignment(playerId, 'default', null);
+      return;
+    }
+
+    if (value === 'unassigned') {
+      onSetPlayerAssignment(playerId, 'unassigned', null);
+      return;
+    }
+
+    onSetPlayerAssignment(playerId, 'manual', value.replace(/^manual:/, ''));
+  }
+
+  function handlePlayerDrop(teamId: string | null): void {
+    if (!draggingPlayerId) return;
+    onAssignPlayerToTeam(draggingPlayerId, teamId);
+    onStartPlayerDrag(null);
+  }
+
+  function renderAssignmentPlayerCard(player: TryoutPlayerSummary) {
+    return (
+      <div key={player.playerId} className="tryout-player-card">
+        <div>
+          <strong>{player.displayName}</strong>
+          <p>
+            {player.defaultGroupId
+              ? `Default placement: ${getTryoutGroupLabel(player.defaultGroupId, groups)}`
+              : 'No automatic group placement'}
+          </p>
+        </div>
+        <label className="field">
+          <span>Placement</span>
+          <select
+            value={getTryoutPlayerAssignmentValue(player)}
+            onChange={(event) => {
+              handleAssignmentChange(player.playerId, event.target.value);
+            }}
+          >
+            <option value="default">
+              {player.defaultGroupId
+                ? `Use default: ${getTryoutGroupLabel(player.defaultGroupId, groups)}`
+                : 'Use default rules'}
+            </option>
+            <option value="unassigned">Move to unassigned pool</option>
+            {groups.map((group) => (
+              <option key={group.id} value={`manual:${group.id}`}>
+                {group.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+    );
+  }
+
+  function renderTeamPlayerCard(
+    player: TryoutPlayerSummary,
+    groupTeams: TryoutSeason['teams'],
+  ) {
+    return (
+      <div
+        key={player.playerId}
+        className="tryout-player-card tryout-player-card--draggable"
+        draggable
+        onDragStart={() => {
+          onStartPlayerDrag(player.playerId);
+        }}
+        onDragEnd={() => {
+          onStartPlayerDrag(null);
+        }}
+      >
+        <div>
+          <strong>{player.displayName}</strong>
+          <p>
+            {player.teamId
+              ? `Team: ${getTryoutTeamLabel(player.teamId, teams)}`
+              : 'Not assigned to a tryout team yet'}
+          </p>
+        </div>
+        <div className="tryout-player-card__controls">
+          <label className="field">
+            <span>Team</span>
+            <select
+              value={player.teamId ?? ''}
+              onChange={(event) => {
+                onAssignPlayerToTeam(player.playerId, event.target.value || null);
+              }}
+              disabled={!player.effectiveGroupId}
+            >
+              <option value="">Unassigned</option>
+              {groupTeams.map((team) => (
+                <option key={team.id} value={team.id}>
+                  {team.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field tryout-player-card__jersey">
+            <span>Jersey</span>
+            <input
+              type="text"
+              value={player.jerseyNumber}
+              onChange={(event) => {
+                onUpdatePlayerJersey(player.playerId, event.target.value);
+              }}
+              placeholder="NN"
+            />
+          </label>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <article className="card">
+      <div className="card-header">
+        <div>
+          <p className="section-eyebrow">Tryout Setup</p>
+          <h2>Build the tryout plan</h2>
+          <p className="section-copy">
+            Create a season, define groups, place players, split teams, and
+            attach those teams to evaluation sessions. This structure becomes
+            the source of truth for the future on-ice evaluation workflow.
+          </p>
+        </div>
+        <span className="status-chip">{roleLabel}</span>
+      </div>
+
+      <div className="form-section">
+        <div className="tryout-toolbar">
+          <label className="field tryout-toolbar__field">
+            <span>New tryout season</span>
+            <input
+              type="text"
+              value={newSeasonName}
+              onChange={(event) => {
+                onNewSeasonNameChange(event.target.value);
+              }}
+              placeholder="Example: 2026-27 Tier II Tryouts"
+            />
+          </label>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={onCreateSeason}
+            disabled={busyAction === 'create-tryout-season'}
+          >
+            {busyAction === 'create-tryout-season'
+              ? 'Creating season...'
+              : 'Create season'}
+          </button>
+        </div>
+      </div>
+
+      <div className="form-section">
+        <h3>Tryout seasons</h3>
+        {loading && !loaded ? (
+          <div className="empty-state-card">
+            <strong>Loading tryout seasons</strong>
+            <p>Pulling the current tryout setup library from the portal.</p>
+          </div>
+        ) : seasons.length === 0 ? (
+          <div className="empty-state-card">
+            <strong>No tryout season yet</strong>
+            <p>
+              Create the first season above to start organizing groups, teams,
+              and sessions.
+            </p>
+          </div>
+        ) : (
+          <div className="tryout-season-list">
+            {seasons.map((season) => (
+              <button
+                key={season.id}
+                className={`template-list-item ${
+                  draft?.id === season.id ? 'template-list-item--active' : ''
+                }`}
+                type="button"
+                onClick={() => {
+                  onSelectSeason(season.id);
+                }}
+              >
+                <div className="template-list-item__content">
+                  <strong>{season.name}</strong>
+                  <p>
+                    {season.groups.length} groups, {season.teams.length} teams,{' '}
+                    {season.sessions.length} sessions
+                  </p>
+                </div>
+                <span className="status-chip">{formatTimestamp(season.updatedAt)}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {draft ? (
+        <>
+          <div className="form-section">
+            <div className="card-header card-header--compact">
+              <div>
+                <h3>Season details</h3>
+                <p className="helper-copy">
+                  Freeform season naming is fine here. You can keep editing this
+                  structure as players move between groups and teams.
+                </p>
+              </div>
+              <div className="action-row">
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={onDeleteSeason}
+                  disabled={busyAction === `delete-tryout-season-${draft.id}`}
+                >
+                  {busyAction === `delete-tryout-season-${draft.id}`
+                    ? 'Deleting...'
+                    : 'Delete season'}
+                </button>
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={onSaveSeason}
+                  disabled={busyAction === `save-tryout-season-${draft.id}`}
+                >
+                  {busyAction === `save-tryout-season-${draft.id}`
+                    ? 'Saving...'
+                    : 'Save tryout setup'}
+                </button>
+              </div>
+            </div>
+
+            <label className="field">
+              <span>Season name</span>
+              <input
+                type="text"
+                value={draft.name}
+                onChange={(event) => {
+                  onSeasonNameChange(event.target.value);
+                }}
+              />
+            </label>
+          </div>
+
+          <div className="form-section">
+            <div className="team-history-header">
+              <div>
+                <h3>Tryout groups</h3>
+                <p className="helper-copy">
+                  Create the group names you actually use, then define which
+                  birth years and genders belong in each one.
+                </p>
+              </div>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={onAddGroup}
+              >
+                Add group
+              </button>
+            </div>
+
+            <div className="tryout-group-list">
+              {groups.length === 0 ? (
+                <div className="empty-state-card">
+                  <strong>No groups defined yet</strong>
+                  <p>
+                    Add your first group to start auto-sorting players into the
+                    right tryout bucket.
+                  </p>
+                </div>
+              ) : (
+                groups.map((group) => (
+                  <div key={group.id} className="criterion-card">
+                    <div className="criterion-card__header">
+                      <div>
+                        <h3>{group.name}</h3>
+                        <p className="helper-copy">
+                          {draft.players.filter((player) =>
+                            player.eligibleGroupIds.includes(group.id),
+                          ).length}{' '}
+                          players match this group by age/gender rules.
+                        </p>
+                      </div>
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={() => {
+                          onRemoveGroup(group.id);
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+
+                    <div className="field-grid">
+                      <label className="field">
+                        <span>Group name</span>
+                        <input
+                          type="text"
+                          value={group.name}
+                          onChange={(event) => {
+                            onUpdateGroupName(group.id, event.target.value);
+                          }}
+                        />
+                      </label>
+                    </div>
+
+                    <div className="form-section">
+                      <h3>Allowed birth years</h3>
+                      <div className="chip-list">
+                        {birthYearOptions.map((birthYear) => (
+                          <label key={`${group.id}-${birthYear}`} className="chip-option">
+                            <input
+                              type="checkbox"
+                              checked={group.allowedBirthYears.includes(birthYear)}
+                              onChange={(event) => {
+                                onToggleGroupBirthYear(
+                                  group.id,
+                                  birthYear,
+                                  event.target.checked,
+                                );
+                              }}
+                            />
+                            <span>{birthYear}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="form-section">
+                      <h3>Allowed genders</h3>
+                      <div className="chip-list">
+                        {TRYOUT_GENDERS.map((gender) => (
+                          <label key={`${group.id}-${gender}`} className="chip-option">
+                            <input
+                              type="checkbox"
+                              checked={group.allowedGenders.includes(gender)}
+                              onChange={(event) => {
+                                onToggleGroupGender(
+                                  group.id,
+                                  gender,
+                                  event.target.checked,
+                                );
+                              }}
+                            />
+                            <span>{gender}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="form-section">
+            <h3>Player placement</h3>
+            <p className="helper-copy">
+              Players default into a group only when they match exactly one
+              group. Everyone else lands in the Unassigned Pool until a coach
+              chooses an override.
+            </p>
+
+            <div className="tryout-roster-list">
+              <div className="criterion-card">
+                <div className="criterion-card__header">
+                  <div>
+                    <h3>Unassigned Pool</h3>
+                    <p className="helper-copy">
+                      Players without a single automatic placement or players
+                      manually moved out of a group.
+                    </p>
+                  </div>
+                  <span className="status-chip">{unassignedPlayers.length}</span>
+                </div>
+
+                <div className="stack-list">
+                  {unassignedPlayers.length === 0 ? (
+                    <div className="stack-card">
+                      <div>
+                        <strong>No players are currently unassigned</strong>
+                        <p>Everyone is either auto-placed or manually assigned.</p>
+                      </div>
+                    </div>
+                  ) : (
+                    unassignedPlayers.map(renderAssignmentPlayerCard)
+                  )}
+                </div>
+              </div>
+
+              {groups.map((group) => {
+                const groupPlayers = draft.players.filter(
+                  (player) => player.effectiveGroupId === group.id,
+                );
+
+                return (
+                  <div key={`placement-${group.id}`} className="criterion-card">
+                    <div className="criterion-card__header">
+                      <div>
+                        <h3>{group.name}</h3>
+                        <p className="helper-copy">
+                          {group.allowedBirthYears.join(', ') || 'No birth years selected'}{' '}
+                          •{' '}
+                          {group.allowedGenders.join(', ') || 'No genders selected'}
+                        </p>
+                      </div>
+                      <span className="status-chip">{groupPlayers.length}</span>
+                    </div>
+
+                    <div className="stack-list">
+                      {groupPlayers.length === 0 ? (
+                        <div className="stack-card">
+                          <div>
+                            <strong>No players in this group yet</strong>
+                            <p>
+                              Players will appear here when they qualify
+                              automatically or are moved here manually.
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        groupPlayers.map(renderAssignmentPlayerCard)
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="form-section">
+            <h3>Tryout teams</h3>
+            <p className="helper-copy">
+              Create teams inside each group, then drag players between team
+              cards or use the team selector for mobile and bulk jersey entry.
+            </p>
+
+            <div className="tryout-team-section-list">
+              {groups.length === 0 ? (
+                <div className="empty-state-card">
+                  <strong>No groups available yet</strong>
+                  <p>
+                    Define at least one tryout group before building teams
+                    inside it.
+                  </p>
+                </div>
+              ) : (
+                groups.map((group) => {
+                  const groupTeams = teams.filter((team) => team.groupId === group.id);
+                  const groupPlayers = draft.players.filter(
+                    (player) => player.effectiveGroupId === group.id,
+                  );
+                  const unteamedPlayers = groupPlayers.filter((player) => !player.teamId);
+
+                  return (
+                    <div key={`teams-${group.id}`} className="criterion-card">
+                      <div className="criterion-card__header">
+                        <div>
+                          <h3>{group.name}</h3>
+                          <p className="helper-copy">
+                            {groupPlayers.length} players currently sit in this group.
+                          </p>
+                        </div>
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => {
+                            onAddTeam(group.id);
+                          }}
+                        >
+                          Add team
+                        </button>
+                      </div>
+
+                      <div className="tryout-team-board">
+                        <div
+                          className="tryout-team-column"
+                          onDragOver={(event) => {
+                            event.preventDefault();
+                          }}
+                          onDrop={() => {
+                            handlePlayerDrop(null);
+                          }}
+                        >
+                          <div className="tryout-team-column__header">
+                            <strong>Available players</strong>
+                            <span>{unteamedPlayers.length}</span>
+                          </div>
+                          <div className="stack-list">
+                            {unteamedPlayers.length === 0 ? (
+                              <div className="stack-card">
+                                <div>
+                                  <strong>No players waiting for a team</strong>
+                                  <p>Drag a player here to clear their team assignment.</p>
+                                </div>
+                              </div>
+                            ) : (
+                              unteamedPlayers.map((player) =>
+                                renderTeamPlayerCard(player, groupTeams),
+                              )
+                            )}
+                          </div>
+                        </div>
+
+                        {groupTeams.map((team) => {
+                          const roster = groupPlayers.filter(
+                            (player) => player.teamId === team.id,
+                          );
+
+                          return (
+                            <div
+                              key={team.id}
+                              className="tryout-team-column"
+                              onDragOver={(event) => {
+                                event.preventDefault();
+                              }}
+                              onDrop={() => {
+                                handlePlayerDrop(team.id);
+                              }}
+                            >
+                              <div className="tryout-team-column__header">
+                                <div className="field">
+                                  <span>Team name</span>
+                                  <input
+                                    type="text"
+                                    value={team.name}
+                                    onChange={(event) => {
+                                      onUpdateTeamName(team.id, event.target.value);
+                                    }}
+                                  />
+                                </div>
+                                <button
+                                  className="ghost-button"
+                                  type="button"
+                                  onClick={() => {
+                                    onRemoveTeam(team.id);
+                                  }}
+                                >
+                                  Remove
+                                </button>
+                              </div>
+
+                              <div className="stack-list">
+                                {roster.length === 0 ? (
+                                  <div className="stack-card">
+                                    <div>
+                                      <strong>No players on this team yet</strong>
+                                      <p>Drop players here or choose this team from the selector.</p>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  roster.map((player) =>
+                                    renderTeamPlayerCard(player, groupTeams),
+                                  )
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          <div className="form-section">
+            <div className="team-history-header">
+              <div>
+                <h3>Evaluation sessions</h3>
+                <p className="helper-copy">
+                  Sessions stay freeform. Attach any number of tryout teams to
+                  each session so evaluators can load the right player set later.
+                </p>
+              </div>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={onAddSession}
+              >
+                Add session
+              </button>
+            </div>
+
+            <div className="tryout-session-list">
+              {sessions.length === 0 ? (
+                <div className="empty-state-card">
+                  <strong>No sessions created yet</strong>
+                  <p>
+                    Add sessions after teams are built, or create them now and
+                    attach teams later.
+                  </p>
+                </div>
+              ) : (
+                sessions.map((session) => (
+                  <div key={session.id} className="criterion-card">
+                    <div className="criterion-card__header">
+                      <label className="field tryout-session-name-field">
+                        <span>Session name</span>
+                        <input
+                          type="text"
+                          value={session.name}
+                          onChange={(event) => {
+                            onUpdateSessionName(session.id, event.target.value);
+                          }}
+                        />
+                      </label>
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={() => {
+                          onRemoveSession(session.id);
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+
+                    <div className="chip-list">
+                      {teams.length === 0 ? (
+                        <div className="stack-card">
+                          <div>
+                            <strong>No teams available yet</strong>
+                            <p>Create teams first, then attach them to sessions here.</p>
+                          </div>
+                        </div>
+                      ) : (
+                        teams.map((team) => (
+                          <label key={`${session.id}-${team.id}`} className="chip-option">
+                            <input
+                              type="checkbox"
+                              checked={session.teamIds.includes(team.id)}
+                              onChange={(event) => {
+                                onToggleSessionTeam(
+                                  session.id,
+                                  team.id,
+                                  event.target.checked,
+                                );
+                              }}
+                            />
+                            <span>
+                              {team.name} ({getTryoutGroupLabel(team.groupId, groups)})
+                            </span>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </>
+      ) : null}
+    </article>
+  );
+}
+
 function buildEditablePlayerState(player: PlayerRecord): EditablePlayerState {
   return {
     id: player.id,
@@ -3574,6 +5525,26 @@ function buildOrganizationSettingsDraft(
   };
 }
 
+function buildEditableEvaluationTemplateState(
+  template: EvaluationTemplate,
+): EditableEvaluationTemplateState {
+  return {
+    name: template.name,
+    criteria: template.criteria.map((criterion) => ({ ...criterion })),
+  };
+}
+
+function buildBlankEvaluationCriterion(): EvaluationCriterion {
+  return {
+    id: crypto.randomUUID(),
+    title: 'New criterion',
+    weight: 50,
+    score1Description: 'Describe what a score of 1 looks like.',
+    score3Description: 'Describe what a score of 3 looks like.',
+    score5Description: 'Describe what a score of 5 looks like.',
+  };
+}
+
 function buildEditableAdminUserState(
   user: AdminUserDirectoryEntry,
 ): EditableAdminUserState {
@@ -3582,6 +5553,257 @@ function buildEditableAdminUserState(
     organizationRoles: [...user.organizationRoles],
     accountStatus: user.accountStatus,
   };
+}
+
+function cloneTryoutSeasonState(season: TryoutSeason): TryoutSeason {
+  return {
+    ...season,
+    groups: season.groups.map((group) => ({
+      ...group,
+      allowedBirthYears: [...group.allowedBirthYears],
+      allowedGenders: [...group.allowedGenders],
+    })),
+    teams: season.teams.map((team) => ({ ...team })),
+    sessions: season.sessions.map((session) => ({
+      ...session,
+      teamIds: [...session.teamIds],
+    })),
+    playerOverrides: season.playerOverrides.map((override) => ({ ...override })),
+    players: season.players.map((player) => ({
+      ...player,
+      eligibleGroupIds: [...player.eligibleGroupIds],
+    })),
+  };
+}
+
+function recalculateTryoutSeasonDraft(season: TryoutSeason): TryoutSeason {
+  const groups = season.groups.map((group) => ({
+    ...group,
+    allowedBirthYears: sortTryoutBirthYears(group.allowedBirthYears),
+    allowedGenders: TRYOUT_GENDERS.filter((gender) =>
+      group.allowedGenders.includes(gender),
+    ),
+  }));
+  const validGroupIds = new Set(groups.map((group) => group.id));
+  const teams = season.teams.filter((team) => validGroupIds.has(team.groupId));
+  const teamMap = new Map(teams.map((team) => [team.id, team]));
+  const sessions = season.sessions.map((session) => ({
+    ...session,
+    teamIds: session.teamIds.filter((teamId) => teamMap.has(teamId)),
+  }));
+  const rawPlayerIdSet = new Set(season.players.map((player) => player.playerId));
+  const normalizedOverrides = season.playerOverrides
+    .filter((override) => rawPlayerIdSet.has(override.playerId))
+    .map((override) => {
+      const normalizedOverride = sanitizeTryoutOverrideState(override);
+
+      if (
+        normalizedOverride.assignmentMode === 'manual' &&
+        normalizedOverride.groupId &&
+        !validGroupIds.has(normalizedOverride.groupId)
+      ) {
+        return {
+          ...normalizedOverride,
+          assignmentMode: 'unassigned' as const,
+          groupId: null,
+          teamId: null,
+        };
+      }
+
+      if (
+        normalizedOverride.teamId &&
+        !teamMap.has(normalizedOverride.teamId)
+      ) {
+        return {
+          ...normalizedOverride,
+          teamId: null,
+        };
+      }
+
+      return normalizedOverride;
+    })
+    .filter((override) => !isDefaultTryoutOverrideState(override));
+  const players = season.players
+    .map((player) =>
+      resolveTryoutPlayerSummary(player, groups, teamMap, normalizedOverrides),
+    )
+    .sort(compareTryoutPlayerSummaries);
+  const playerIdSet = new Set(players.map((player) => player.playerId));
+  const playerOverrides = normalizedOverrides.filter((override) =>
+    playerIdSet.has(override.playerId),
+  );
+
+  return {
+    ...season,
+    groups,
+    teams,
+    sessions,
+    playerOverrides,
+    players,
+  };
+}
+
+function resolveTryoutPlayerSummary(
+  player: TryoutPlayerSummary,
+  groups: TryoutSeason['groups'],
+  teamMap: Map<string, TryoutSeason['teams'][number]>,
+  overrides: TryoutPlayerOverride[],
+): TryoutPlayerSummary {
+  const eligibleGroupIds = groups
+    .filter((group) => matchesTryoutPlayerToGroup(player, group))
+    .map((group) => group.id);
+  const defaultGroupId =
+    eligibleGroupIds.length === 1 ? eligibleGroupIds[0] : null;
+  const override =
+    overrides.find((entry) => entry.playerId === player.playerId) ?? null;
+  const effectiveGroupId =
+    override?.assignmentMode === 'manual' && override.groupId
+      ? override.groupId
+      : override?.assignmentMode === 'unassigned'
+        ? null
+        : defaultGroupId;
+  const effectiveTeam =
+    override?.teamId ? teamMap.get(override.teamId) ?? null : null;
+
+  return {
+    ...player,
+    eligibleGroupIds,
+    defaultGroupId,
+    effectiveGroupId,
+    teamId:
+      effectiveTeam && effectiveGroupId && effectiveTeam.groupId === effectiveGroupId
+        ? effectiveTeam.id
+        : null,
+    jerseyNumber: override?.jerseyNumber?.trim() ?? '',
+  };
+}
+
+function matchesTryoutPlayerToGroup(
+  player: Pick<TryoutPlayerSummary, 'birthYear' | 'gender'>,
+  group: TryoutSeason['groups'][number],
+): boolean {
+  return (
+    group.allowedBirthYears.length > 0 &&
+    group.allowedBirthYears.includes(player.birthYear) &&
+    group.allowedGenders.length > 0 &&
+    group.allowedGenders.includes(player.gender as TryoutGender)
+  );
+}
+
+function compareTryoutPlayerSummaries(
+  left: TryoutPlayerSummary,
+  right: TryoutPlayerSummary,
+): number {
+  const lastNameComparison = left.lastName.localeCompare(right.lastName);
+  if (lastNameComparison !== 0) return lastNameComparison;
+
+  const firstNameComparison = left.firstName.localeCompare(right.firstName);
+  if (firstNameComparison !== 0) return firstNameComparison;
+
+  if (left.birthYear !== right.birthYear) {
+    return left.birthYear.localeCompare(right.birthYear);
+  }
+
+  return left.displayName.localeCompare(right.displayName);
+}
+
+function updateTryoutPlayerOverridesState(
+  overrides: TryoutPlayerOverride[],
+  playerId: string,
+  updater: (override: TryoutPlayerOverride) => TryoutPlayerOverride,
+): TryoutPlayerOverride[] {
+  const existingOverride =
+    overrides.find((override) => override.playerId === playerId) ?? {
+      playerId,
+      assignmentMode: 'default' as const,
+      groupId: null,
+      teamId: null,
+      jerseyNumber: '',
+    };
+  const nextOverride = sanitizeTryoutOverrideState(updater(existingOverride));
+  const remainingOverrides = overrides.filter(
+    (override) => override.playerId !== playerId,
+  );
+
+  return isDefaultTryoutOverrideState(nextOverride)
+    ? remainingOverrides
+    : [...remainingOverrides, nextOverride];
+}
+
+function sanitizeTryoutOverrideState(
+  override: TryoutPlayerOverride,
+): TryoutPlayerOverride {
+  return {
+    playerId: override.playerId,
+    assignmentMode: override.assignmentMode,
+    groupId: override.assignmentMode === 'manual' ? override.groupId ?? null : null,
+    teamId: override.assignmentMode === 'unassigned' ? null : override.teamId ?? null,
+    jerseyNumber: override.jerseyNumber.trim(),
+  };
+}
+
+function isDefaultTryoutOverrideState(
+  override: TryoutPlayerOverride,
+): boolean {
+  return (
+    override.assignmentMode === 'default' &&
+    override.groupId === null &&
+    override.teamId === null &&
+    override.jerseyNumber === ''
+  );
+}
+
+function buildTryoutBirthYearOptions(
+  players: TryoutPlayerSummary[],
+  date = new Date(),
+): string[] {
+  const years = new Set<string>();
+  const currentYear = date.getFullYear();
+
+  for (let year = currentYear - 7; year >= currentYear - 20; year -= 1) {
+    years.add(String(year));
+  }
+
+  players.forEach((player) => {
+    if (/^\d{4}$/.test(player.birthYear)) {
+      years.add(player.birthYear);
+    }
+  });
+
+  return sortTryoutBirthYears([...years]);
+}
+
+function sortTryoutBirthYears(values: string[]): string[] {
+  return [...new Set(values.filter((value) => /^\d{4}$/.test(value)))]
+    .sort((left, right) => Number(right) - Number(left));
+}
+
+function getTryoutPlayerAssignmentValue(player: TryoutPlayerSummary): string {
+  if (player.effectiveGroupId && player.effectiveGroupId === player.defaultGroupId) {
+    return 'default';
+  }
+
+  if (player.effectiveGroupId) {
+    return `manual:${player.effectiveGroupId}`;
+  }
+
+  return player.defaultGroupId ? 'unassigned' : 'unassigned';
+}
+
+function getTryoutGroupLabel(
+  groupId: string | null,
+  groups: TryoutSeason['groups'],
+): string {
+  if (!groupId) return 'Unassigned Pool';
+  return groups.find((group) => group.id === groupId)?.name ?? 'Unknown group';
+}
+
+function getTryoutTeamLabel(
+  teamId: string | null,
+  teams: TryoutSeason['teams'],
+): string {
+  if (!teamId) return 'Unassigned';
+  return teams.find((team) => team.id === teamId)?.name ?? 'Unknown team';
 }
 
 function toggleOrganizationRole(
@@ -3619,6 +5841,7 @@ function getUserWorkspaceSections(
   if (activeRole === 'staff' || activeRole === 'coach' || activeRole === 'manager') {
     return [
       { id: 'overview', label: 'Overview' },
+      { id: 'tryouts', label: 'Tryout Setup' },
       { id: 'profile', label: 'My Profile' },
     ];
   }
@@ -3644,6 +5867,7 @@ function getUserWorkspaceSections(
 
   return [
     { id: 'overview', label: 'Overview' },
+    { id: 'tryouts', label: 'Tryout Setup' },
     { id: 'profile', label: 'My Profile' },
   ];
 }
@@ -3715,6 +5939,12 @@ function sortTeamHistoryEntries(
       return left.index - right.index;
     })
     .map(({ entry }) => entry);
+}
+
+function normalizeCriterionWeightInput(value: string): number {
+  const parsedValue = Number(value);
+  if (!Number.isFinite(parsedValue)) return 1;
+  return Math.max(1, Math.min(100, Math.trunc(parsedValue)));
 }
 
 function buildRecentSeasonOptions(date = new Date()): string[] {
@@ -3795,10 +6025,10 @@ function describeWorkspace(
     return 'Platform administration tools for multi-organization access.';
   }
   if (activeRole === 'staff') {
-    return 'Staff onboarding workspace while awaiting assigned club permissions.';
+    return 'Staff workspace with tryout planning and profile tools.';
   }
-  if (activeRole === 'coach') return 'Coach workspace for future staff workflows.';
-  if (activeRole === 'manager') return 'Manager workspace for future staff workflows.';
+  if (activeRole === 'coach') return 'Coach workspace with live tryout setup tools.';
+  if (activeRole === 'manager') return 'Manager workspace with live tryout setup tools.';
   if (activeRole === 'parent') {
     return 'Family workspace for linked player records and intake forms.';
   }

@@ -263,6 +263,70 @@ export class GoldenBearsPlayerPortalStack extends Stack {
       authorizerId: jwtAuthorizer.ref,
     });
 
+    new apigwv2.CfnRoute(this, 'AdminEvaluationTemplatesListRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'GET /admin/evaluation-templates',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
+    new apigwv2.CfnRoute(this, 'AdminEvaluationTemplatesCreateRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'POST /admin/evaluation-templates',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
+    new apigwv2.CfnRoute(this, 'AdminEvaluationTemplatesUpdateRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'PUT /admin/evaluation-templates/{templateId}',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
+    new apigwv2.CfnRoute(this, 'AdminEvaluationTemplatesDeleteRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'DELETE /admin/evaluation-templates/{templateId}',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
+    new apigwv2.CfnRoute(this, 'TryoutSeasonsListRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'GET /tryout-seasons',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
+    new apigwv2.CfnRoute(this, 'TryoutSeasonsCreateRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'POST /tryout-seasons',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
+    new apigwv2.CfnRoute(this, 'TryoutSeasonsUpdateRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'PUT /tryout-seasons/{seasonId}',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
+    new apigwv2.CfnRoute(this, 'TryoutSeasonsDeleteRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'DELETE /tryout-seasons/{seasonId}',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
     new apigwv2.CfnRoute(this, 'PlayersCreateRoute', {
       apiId: httpApi.apiId,
       routeKey: 'POST /players',
