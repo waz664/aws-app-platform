@@ -87,6 +87,7 @@ type AdminWorkspaceView =
   | 'tryouts'
   | 'templates'
   | 'users'
+  | 'design-lab'
   | 'profile'
   | 'access'
   | 'architecture';
@@ -112,6 +113,101 @@ type UserWorkspaceView =
   | 'player'
   | 'intake'
   | 'invites';
+
+type DesignLabView = 'family-hub' | 'profile-inline' | 'ops-command';
+
+type DesignLabPanel = 'actions' | 'players' | 'updates';
+
+type DesignLabDensity = 'comfortable' | 'compact';
+
+type DesignLabProfileField =
+  | 'firstName'
+  | 'lastName'
+  | 'contactEmail'
+  | 'phoneNumber'
+  | 'birthYear'
+  | 'primaryPosition'
+  | 'handedness'
+  | 'firstYearPlayingHockey';
+
+type DesignLabPlayerPreview = {
+  id: string;
+  displayName: string;
+  birthYear: string;
+  position: string;
+  relationshipLabel: string;
+  intakeStatus: string;
+  currentFocus: string;
+  summary: string;
+};
+
+type DesignLabActionPreview = {
+  id: string;
+  title: string;
+  detail: string;
+  buttonLabel: string;
+  playerId: string;
+};
+
+type DesignLabUpdatePreview = {
+  id: string;
+  title: string;
+  detail: string;
+  timestampLabel: string;
+  playerId: string;
+};
+
+type DesignLabProfileState = {
+  firstName: string;
+  lastName: string;
+  contactEmail: string;
+  phoneNumber: string;
+  birthYear: string;
+  gender: string;
+  primaryPosition: string;
+  handedness: string;
+  firstYearPlayingHockey: string;
+  height: string;
+  weight: string;
+};
+
+type DesignLabTeamHistoryEntry = {
+  id: string;
+  seasonLabel: string;
+  teamName: string;
+  positionPlayed: string;
+  note: string;
+};
+
+type DesignLabRosterEntry = {
+  id: string;
+  displayName: string;
+  groupName: string;
+  teamName: string;
+  jerseyNumber: string;
+  sessionName: string;
+  assignmentStatus: 'Default' | 'Override' | 'Unassigned';
+  note: string;
+};
+
+type FamilySummaryPanel = 'actions' | 'players' | 'updates';
+
+type FamilyActionItem = {
+  id: string;
+  title: string;
+  detail: string;
+  targetSection: UserWorkspaceView;
+  playerId: string | 'new' | null;
+};
+
+type FamilyUpdateItem = {
+  id: string;
+  title: string;
+  detail: string;
+  timestamp: string;
+  targetSection: UserWorkspaceView;
+  playerId: string | 'new' | null;
+};
 
 type TryoutSetupCardProps = {
   roleLabel: string;
@@ -169,9 +265,8 @@ type UserProfileCardProps = {
   signInEmail: string;
   userDraft: EditableUserProfileState;
   busyAction: string | null;
-  onFieldChange: (field: UserProfileFieldKey, value: string) => void;
-  onSmsOptInChange: (value: boolean) => void;
-  onSave: () => void;
+  onFieldCommit: (field: UserProfileFieldKey, value: string) => void;
+  onSmsOptInCommit: (value: boolean) => void;
 };
 
 const ROLE_ORDER: AppRole[] = [
@@ -205,6 +300,26 @@ const TRYOUT_GENDERS: TryoutGender[] = [
   'Female',
   'Non-binary',
   'Prefer not to say',
+];
+
+const playerGenderOptions = [
+  { value: 'Male', label: 'Male' },
+  { value: 'Female', label: 'Female' },
+  { value: 'Non-binary', label: 'Non-binary' },
+  { value: 'Prefer not to say', label: 'Prefer not to say' },
+];
+
+const playerPositionOptions = [
+  { value: 'Forward', label: 'Forward' },
+  { value: 'Center', label: 'Center' },
+  { value: 'Wing', label: 'Wing' },
+  { value: 'Defense', label: 'Defense' },
+  { value: 'Goalie', label: 'Goalie' },
+];
+
+const handednessOptions = [
+  { value: 'Left', label: 'Left' },
+  { value: 'Right', label: 'Right' },
 ];
 
 const nextSeasonOptions: ChoiceOption[] = [
@@ -340,6 +455,158 @@ const defaultAdminUserFilters: AdminUserFiltersState = {
   accountStatus: 'all',
 };
 
+const DESIGN_LAB_PLAYERS: DesignLabPlayerPreview[] = [
+  {
+    id: 'avery',
+    displayName: 'Avery Morgan (11)',
+    birthYear: '2011',
+    position: 'Defense',
+    relationshipLabel: 'Parent linked',
+    intakeStatus: 'Submitted',
+    currentFocus: 'Player invite still pending for Avery.',
+    summary: '16U eligible / Development intake submitted / Right defense',
+  },
+  {
+    id: 'luca',
+    displayName: 'Luca Morgan (13)',
+    birthYear: '2013',
+    position: 'Center',
+    relationshipLabel: 'Parent owner',
+    intakeStatus: 'Draft',
+    currentFocus: 'Luca still needs two intake questions finished.',
+    summary: '14U eligible / Draft intake / Center-forward profile',
+  },
+];
+
+const DESIGN_LAB_ACTIONS: DesignLabActionPreview[] = [
+  {
+    id: 'finish-intake',
+    title: 'Finish Luca intake draft',
+    detail: 'Two unanswered tryout questions are holding back final submission.',
+    buttonLabel: 'Open intake draft',
+    playerId: 'luca',
+  },
+  {
+    id: 'accept-invite',
+    title: 'Resolve Avery linked access',
+    detail: 'A player invite is still waiting for Avery to accept from their own login.',
+    buttonLabel: 'Review invite',
+    playerId: 'avery',
+  },
+  {
+    id: 'update-contact',
+    title: 'Confirm text notification number',
+    detail: 'The parent account added a phone number but has not confirmed SMS preferences for tryout updates.',
+    buttonLabel: 'Open profile',
+    playerId: 'luca',
+  },
+];
+
+const DESIGN_LAB_UPDATES: DesignLabUpdatePreview[] = [
+  {
+    id: 'update-1',
+    title: 'Avery profile was updated',
+    detail: 'Height and weight were refreshed after spring training.',
+    timestampLabel: 'Today at 7:12 PM',
+    playerId: 'avery',
+  },
+  {
+    id: 'update-2',
+    title: 'Luca draft was saved',
+    detail: 'The player profile is complete, but the intake questions are still in progress.',
+    timestampLabel: 'Yesterday at 8:41 PM',
+    playerId: 'luca',
+  },
+  {
+    id: 'update-3',
+    title: 'Tryout window is now published',
+    detail: 'North Carolina Tier 2 tryouts are scheduled for May 1-3, 2026.',
+    timestampLabel: 'Apr 5 at 10:05 AM',
+    playerId: 'avery',
+  },
+];
+
+const DESIGN_LAB_PROFILE_INITIAL: DesignLabProfileState = {
+  firstName: 'Avery',
+  lastName: 'Morgan',
+  contactEmail: 'morganfamily@example.com',
+  phoneNumber: '(919) 555-0134',
+  birthYear: '2011',
+  gender: 'Female',
+  primaryPosition: 'Defense',
+  handedness: 'Right',
+  firstYearPlayingHockey: '2017',
+  height: `5'5"`,
+  weight: '122 lbs',
+};
+
+const DESIGN_LAB_TEAM_HISTORY: DesignLabTeamHistoryEntry[] = [
+  {
+    id: 'team-1',
+    seasonLabel: '2026-27',
+    teamName: 'NC Golden Bears 16U',
+    positionPlayed: 'Defense',
+    note: 'Primary fall and winter team',
+  },
+  {
+    id: 'team-2',
+    seasonLabel: '2025-26',
+    teamName: 'Triangle Elite Spring',
+    positionPlayed: 'Defense',
+    note: 'Spring showcase roster',
+  },
+  {
+    id: 'team-3',
+    seasonLabel: '2025-26',
+    teamName: 'NC Golden Bears 14U',
+    positionPlayed: 'Defense',
+    note: 'Previous regular season team',
+  },
+];
+
+const DESIGN_LAB_ROSTER: DesignLabRosterEntry[] = [
+  {
+    id: 'roster-1',
+    displayName: 'Avery Morgan (11)',
+    groupName: '16U Tier II',
+    teamName: 'Blue',
+    jerseyNumber: '17',
+    sessionName: 'Friday ID Skate',
+    assignmentStatus: 'Default',
+    note: 'Auto-placed from birth year rule',
+  },
+  {
+    id: 'roster-2',
+    displayName: 'Chase Ramirez (11)',
+    groupName: '16U Tier II',
+    teamName: 'Orange',
+    jerseyNumber: '9',
+    sessionName: 'Friday ID Skate',
+    assignmentStatus: 'Default',
+    note: 'Ready for coach evaluation load',
+  },
+  {
+    id: 'roster-3',
+    displayName: 'Luca Morgan (13)',
+    groupName: '15U Invite',
+    teamName: 'Black',
+    jerseyNumber: '22',
+    sessionName: 'Saturday Pace Session',
+    assignmentStatus: 'Override',
+    note: 'Coach override into a higher-age look',
+  },
+  {
+    id: 'roster-4',
+    displayName: 'Parker Lee (12)',
+    groupName: 'Unassigned Pool',
+    teamName: 'Unassigned',
+    jerseyNumber: '',
+    sessionName: 'No sessions yet',
+    assignmentStatus: 'Unassigned',
+    note: 'Still waiting on a final placement call',
+  },
+];
+
 function App() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -360,6 +627,8 @@ function App() {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [activeAdminSection, setActiveAdminSection] = useState<AdminWorkspaceView>('overview');
   const [activeUserSection, setActiveUserSection] = useState<UserWorkspaceView>('overview');
+  const [activeFamilySummaryPanel, setActiveFamilySummaryPanel] =
+    useState<FamilySummaryPanel>('actions');
   const [adminUserFilters, setAdminUserFilters] = useState<AdminUserFiltersState>(
     defaultAdminUserFilters,
   );
@@ -556,6 +825,18 @@ function App() {
       setSelectedPlayerId(nextSelectedPlayerId);
     }
   }, [activeRole, bootstrap, selectedPlayerId]);
+
+  useEffect(() => {
+    if (!bootstrap) return;
+    const familyRole = resolveFamilyRole(activeRole, bootstrap.user.primaryRole);
+    if (!familyRole) return;
+
+    setActiveFamilySummaryPanel((currentValue) =>
+      currentValue === 'actions' || currentValue === 'players' || currentValue === 'updates'
+        ? currentValue
+        : 'actions',
+    );
+  }, [activeRole, bootstrap]);
 
   useEffect(() => {
     if (!bootstrap) return;
@@ -806,6 +1087,119 @@ function App() {
     }
   }
 
+  async function runSilentAction(
+    actionKey: string,
+    operation: () => Promise<void>,
+  ): Promise<void> {
+    setBusyAction(actionKey);
+
+    try {
+      await operation();
+    } catch (error) {
+      setFeedback({
+        tone: 'error',
+        message: getErrorMessage(error),
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function saveCurrentUserDraft(
+    nextDraft: EditableUserProfileState,
+    options?: { silent?: boolean },
+  ): Promise<void> {
+    if (!runtimeConfig || !authSession) return;
+
+    const firstName = nextDraft.firstName.trim();
+    const lastName = nextDraft.lastName.trim();
+
+    if (!firstName || !lastName) {
+      setFeedback({
+        tone: 'error',
+        message: 'First name and last name are required to save your profile.',
+      });
+      return;
+    }
+
+    const execute = options?.silent ? runSilentAction : runAction;
+
+    await execute('save-user-profile', async () => {
+      setUserDraft(nextDraft);
+
+      const nextBootstrap = await updateCurrentUserProfile(
+        runtimeConfig,
+        authSession.idToken,
+        {
+          firstName,
+          lastName,
+          contactEmail: nextDraft.contactEmail.trim(),
+          phoneNumber: nextDraft.phoneNumber.trim(),
+          smsOptIn: nextDraft.smsOptIn,
+        },
+      );
+
+      setBootstrap(nextBootstrap);
+
+      if (!options?.silent) {
+        setFeedback({
+          tone: 'success',
+          message: 'Your profile has been updated.',
+        });
+      }
+    });
+  }
+
+  async function savePlayerDraft(
+    nextDraft: EditablePlayerState,
+    nextStatus: IntakeStatus,
+    options?: { silent?: boolean; successMessage?: string },
+  ): Promise<void> {
+    if (!runtimeConfig || !authSession) return;
+
+    const actionKey =
+      nextDraft.id === null
+        ? `create-${options?.silent ? 'profile' : nextStatus}`
+        : `update-${options?.silent ? 'profile' : nextStatus}`;
+
+    const execute = options?.silent ? runSilentAction : runAction;
+
+    await execute(actionKey, async () => {
+      setDraftPlayer(nextDraft);
+
+      const payload = {
+        profile: nextDraft.profile,
+        intake: nextDraft.intake,
+        intakeStatus: nextStatus,
+      };
+
+      const response =
+        nextDraft.id === null
+          ? await createPlayer(runtimeConfig, authSession.idToken, payload)
+          : await updatePlayer(
+              runtimeConfig,
+              authSession.idToken,
+              nextDraft.id,
+              payload,
+            );
+
+      setBootstrap(response.bootstrap);
+      setSelectedPlayerId(response.player.id);
+      setDraftPlayer(buildEditablePlayerState(response.player));
+
+      if (!options?.silent) {
+        setFeedback({
+          tone: 'success',
+          message:
+            options?.successMessage ??
+            (nextStatus === 'submitted'
+              ? 'The intake form has been submitted.'
+              : 'The intake draft has been saved.'),
+        });
+      }
+    });
+  }
+
   async function handleSignIn(): Promise<void> {
     if (!runtimeConfig) return;
 
@@ -840,20 +1234,6 @@ function App() {
         message: `This account is now set up as ${ROLE_LABELS[role].toLowerCase()}.`,
       });
     });
-  }
-
-  function updateUserDraftField(
-    field: UserProfileFieldKey,
-    value: string,
-  ): void {
-    setUserDraft((currentValue) =>
-      currentValue
-        ? {
-            ...currentValue,
-            [field]: value,
-          }
-        : currentValue,
-    );
   }
 
   function updateDraftPlayerProfileField<K extends keyof PlayerProfileInput>(
@@ -972,41 +1352,6 @@ function App() {
           }
         : currentValue,
     );
-  }
-
-  async function handleSaveCurrentUser(): Promise<void> {
-    if (!runtimeConfig || !authSession || !userDraft) return;
-
-    const firstName = userDraft.firstName.trim();
-    const lastName = userDraft.lastName.trim();
-
-    if (!firstName || !lastName) {
-      setFeedback({
-        tone: 'error',
-        message: 'First name and last name are required to save your profile.',
-      });
-      return;
-    }
-
-    await runAction('save-user-profile', async () => {
-      const nextBootstrap = await updateCurrentUserProfile(
-        runtimeConfig,
-        authSession.idToken,
-        {
-          firstName,
-          lastName,
-          contactEmail: userDraft.contactEmail.trim(),
-          phoneNumber: userDraft.phoneNumber.trim(),
-          smsOptIn: userDraft.smsOptIn,
-        },
-      );
-
-      setBootstrap(nextBootstrap);
-      setFeedback({
-        tone: 'success',
-        message: 'Your profile has been updated.',
-      });
-    });
   }
 
   async function handleClaimAdmin(): Promise<void> {
@@ -1147,6 +1492,84 @@ function App() {
           }
         : currentValue,
     );
+  }
+
+  function commitCurrentUserField(
+    field: UserProfileFieldKey,
+    value: string,
+  ): void {
+    if (!userDraft) return;
+
+    const nextDraft = {
+      ...userDraft,
+      [field]: value,
+    };
+
+    void saveCurrentUserDraft(nextDraft, { silent: true });
+  }
+
+  function commitCurrentUserSmsOptIn(value: boolean): void {
+    if (!userDraft) return;
+
+    const nextDraft = {
+      ...userDraft,
+      smsOptIn: value,
+    };
+
+    void saveCurrentUserDraft(nextDraft, { silent: true });
+  }
+
+  function commitExistingPlayerProfile(
+    buildNextDraft: (currentValue: EditablePlayerState) => EditablePlayerState,
+  ): void {
+    if (!draftPlayer || draftPlayer.id === null) return;
+
+    const nextDraft = buildNextDraft(draftPlayer);
+    void savePlayerDraft(nextDraft, draftPlayer.intakeStatus, { silent: true });
+  }
+
+  function commitExistingPlayerName(
+    field: 'firstName' | 'lastName',
+    value: string,
+  ): void {
+    commitExistingPlayerProfile((currentValue) => {
+      const nextProfile = {
+        ...currentValue.profile,
+        [field]: value,
+      };
+
+      return {
+        ...currentValue,
+        profile: {
+          ...nextProfile,
+          playerName: buildPlayerName(nextProfile.firstName, nextProfile.lastName),
+        },
+      };
+    });
+  }
+
+  function commitExistingPlayerProfileField<K extends keyof PlayerProfileInput>(
+    field: K,
+    value: PlayerProfileInput[K],
+  ): void {
+    commitExistingPlayerProfile((currentValue) => ({
+      ...currentValue,
+      profile: {
+        ...currentValue.profile,
+        [field]: value,
+      },
+    }));
+  }
+
+  function commitExistingPlayerPrimaryPosition(value: string): void {
+    commitExistingPlayerProfile((currentValue) => ({
+      ...currentValue,
+      profile: {
+        ...currentValue.profile,
+        primaryPosition: value,
+        positions: value,
+      },
+    }));
   }
 
   function updateEvaluationCriterionField(
@@ -1766,39 +2189,8 @@ function App() {
   }
 
   async function handleSavePlayer(nextStatus: IntakeStatus): Promise<void> {
-    if (!runtimeConfig || !authSession || !draftPlayer) return;
-
-    const actionKey =
-      draftPlayer.id === null ? `create-${nextStatus}` : `update-${nextStatus}`;
-
-    await runAction(actionKey, async () => {
-      const payload = {
-        profile: draftPlayer.profile,
-        intake: draftPlayer.intake,
-        intakeStatus: nextStatus,
-      };
-
-      const response =
-        draftPlayer.id === null
-          ? await createPlayer(runtimeConfig, authSession.idToken, payload)
-          : await updatePlayer(
-              runtimeConfig,
-              authSession.idToken,
-              draftPlayer.id,
-              payload,
-            );
-
-      setBootstrap(response.bootstrap);
-      setSelectedPlayerId(response.player.id);
-      setDraftPlayer(buildEditablePlayerState(response.player));
-      setFeedback({
-        tone: 'success',
-        message:
-          nextStatus === 'submitted'
-            ? 'The intake form has been submitted.'
-            : 'The intake draft has been saved.',
-      });
-    });
+    if (!draftPlayer) return;
+    await savePlayerDraft(draftPlayer, nextStatus);
   }
 
   async function handleCreateInvite(): Promise<void> {
@@ -1960,18 +2352,13 @@ function App() {
   const familyRole = resolveFamilyRole(activeRole, bootstrap.user.primaryRole);
   const currentInviteRole = resolveInviteRole(familyRole);
   const playerCount = bootstrap.players.length;
-  const submittedCount = bootstrap.players.filter(
-    (player) => player.intake.status === 'submitted',
-  ).length;
-  const draftCount = bootstrap.players.filter(
-    (player) => player.intake.status === 'draft',
-  ).length;
-  const pendingSentInvites = bootstrap.players.reduce(
-    (count, player) =>
-      count +
-      player.sentInvites.filter((invite) => invite.status === 'pending').length,
-    0,
-  );
+  const familyActionItems = familyRole
+    ? buildFamilyActionItems(bootstrap.players, bootstrap.receivedInvites)
+    : [];
+  const familyUpdateItems = familyRole
+    ? buildFamilyUpdateItems(bootstrap.players, bootstrap.receivedInvites)
+    : [];
+  const nextEventLabel = buildNextEventLabel(bootstrap.organization);
   const recentSeasonOptions = buildRecentSeasonOptions();
   const activeWorkspaceTitle = activeRole ? ROLE_LABELS[activeRole] : 'Select role';
   const activeWorkspaceCopy = describeWorkspace(activeRole, bootstrap.user.primaryRole);
@@ -2043,20 +2430,8 @@ function App() {
       signInEmail={bootstrap.user.email}
       userDraft={userDraft}
       busyAction={busyAction}
-      onFieldChange={updateUserDraftField}
-      onSmsOptInChange={(value) => {
-        setUserDraft((currentValue) =>
-          currentValue
-            ? {
-                ...currentValue,
-                smsOptIn: value,
-              }
-            : currentValue,
-        );
-      }}
-      onSave={() => {
-        void handleSaveCurrentUser();
-      }}
+      onFieldCommit={commitCurrentUserField}
+      onSmsOptInCommit={commitCurrentUserSmsOptIn}
     />
   ) : null;
   const workspaceAccessCard = (
@@ -2293,24 +2668,162 @@ function App() {
           </article>
         </section>
       ) : !isAccountDisabled && familyRole ? (
-        <section className="summary-strip">
-          <article className="summary-card">
-            <span>Linked players</span>
-            <strong>{playerCount}</strong>
-          </article>
-          <article className="summary-card">
-            <span>Submitted intakes</span>
-            <strong>{submittedCount}</strong>
-          </article>
-          <article className="summary-card">
-            <span>Draft intakes</span>
-            <strong>{draftCount}</strong>
-          </article>
-          <article className="summary-card">
-            <span>Pending invites</span>
-            <strong>{pendingSentInvites + bootstrap.receivedInvites.length}</strong>
-          </article>
-        </section>
+        <>
+          <section className="action-dock">
+            <button
+              className={`action-dock__chip ${
+                activeFamilySummaryPanel === 'actions'
+                  ? 'action-dock__chip--active'
+                  : ''
+              }`}
+              type="button"
+              onClick={() => {
+                setActiveFamilySummaryPanel('actions');
+              }}
+            >
+              <span>Required actions</span>
+              <strong>{familyActionItems.length}</strong>
+            </button>
+            <button
+              className={`action-dock__chip ${
+                activeFamilySummaryPanel === 'players'
+                  ? 'action-dock__chip--active'
+                  : ''
+              }`}
+              type="button"
+              onClick={() => {
+                setActiveFamilySummaryPanel('players');
+              }}
+            >
+              <span>Linked players</span>
+              <strong>{playerCount}</strong>
+            </button>
+            <button
+              className={`action-dock__chip ${
+                activeFamilySummaryPanel === 'updates'
+                  ? 'action-dock__chip--active'
+                  : ''
+              }`}
+              type="button"
+              onClick={() => {
+                setActiveFamilySummaryPanel('updates');
+              }}
+            >
+              <span>Recent updates</span>
+              <strong>{familyUpdateItems.length}</strong>
+            </button>
+            <button
+              className="action-dock__chip action-dock__chip--static"
+              type="button"
+              onClick={() => {
+                setActiveUserSection('intake');
+              }}
+            >
+              <span>Next event</span>
+              <strong>{nextEventLabel}</strong>
+            </button>
+          </section>
+
+          <section className="action-panel">
+            {activeFamilySummaryPanel === 'actions' ? (
+              familyActionItems.length === 0 ? (
+                <div className="stack-card">
+                  <div>
+                    <strong>No required actions right now</strong>
+                    <p>
+                      Player records, intake work, and linked access are all in
+                      a good state for this login.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                familyActionItems.map((item) => (
+                  <button
+                    key={item.id}
+                    className="action-panel__item"
+                    type="button"
+                    onClick={() => {
+                      if (item.playerId) setSelectedPlayerId(item.playerId);
+                      setActiveUserSection(item.targetSection);
+                    }}
+                  >
+                    <div>
+                      <strong>{item.title}</strong>
+                      <p>{item.detail}</p>
+                    </div>
+                    <span className="status-chip">{sectionLabel(item.targetSection)}</span>
+                  </button>
+                ))
+              )
+            ) : null}
+
+            {activeFamilySummaryPanel === 'players' ? (
+              bootstrap.players.length === 0 ? (
+                <div className="stack-card">
+                  <div>
+                    <strong>No linked player records yet</strong>
+                    <p>
+                      Add a player record to start the intake and linked-access
+                      workflow.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                bootstrap.players.map((player) => (
+                  <button
+                    key={player.id}
+                    className="action-panel__item"
+                    type="button"
+                    onClick={() => {
+                      setSelectedPlayerId(player.id);
+                      setActiveUserSection('player');
+                    }}
+                  >
+                    <div>
+                      <strong>{getPlayerDisplayName(player.profile)}</strong>
+                      <p>{buildPlayerListSummary(player)}</p>
+                    </div>
+                    <span className="status-chip">
+                      {formatIntakeStatus(player.intake.status)}
+                    </span>
+                  </button>
+                ))
+              )
+            ) : null}
+
+            {activeFamilySummaryPanel === 'updates' ? (
+              familyUpdateItems.length === 0 ? (
+                <div className="stack-card">
+                  <div>
+                    <strong>No recent updates yet</strong>
+                    <p>
+                      Activity on player records, intake progress, and invites
+                      will show up here.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                familyUpdateItems.map((item) => (
+                  <button
+                    key={item.id}
+                    className="action-panel__item"
+                    type="button"
+                    onClick={() => {
+                      if (item.playerId) setSelectedPlayerId(item.playerId);
+                      setActiveUserSection(item.targetSection);
+                    }}
+                  >
+                    <div>
+                      <strong>{item.title}</strong>
+                      <p>{item.detail}</p>
+                    </div>
+                    <span className="status-chip">{formatTimestamp(item.timestamp)}</span>
+                  </button>
+                ))
+              )
+            ) : null}
+          </section>
+        </>
       ) : null}
 
       <main className="app-content">
@@ -2408,6 +2921,7 @@ function App() {
                     ['tryouts', 'Tryouts'],
                     ['templates', 'Evaluations'],
                     ['users', 'Users'],
+                    ['design-lab', 'Design Lab'],
                     ['profile', 'My Profile'],
                     ['access', 'Access'],
                     ['architecture', 'Architecture'],
@@ -2663,18 +3177,18 @@ function App() {
 
                     <div className="footer-note">
                       <div className="action-row">
-                        <button
-                          className="primary-button"
-                          type="button"
+                        <IconLabelActionButton
+                          label={
+                            busyAction === 'save-organization'
+                              ? 'Saving organization...'
+                              : 'Save organization'
+                          }
+                          icon="save"
                           onClick={() => {
                             void handleSaveOrganization();
                           }}
                           disabled={busyAction === 'save-organization'}
-                        >
-                          {busyAction === 'save-organization'
-                            ? 'Saving organization...'
-                            : 'Save organization settings'}
-                        </button>
+                        />
                         <a
                           className="link-button"
                           href={bootstrap.organization.website}
@@ -2706,30 +3220,30 @@ function App() {
                       </div>
 
                       <div className="action-row">
-                        <button
-                          className="secondary-button"
-                          type="button"
+                        <IconLabelActionButton
+                          label={
+                            busyAction === 'create-template-blank'
+                              ? 'Creating template...'
+                              : 'New template'
+                          }
+                          icon="add"
                           onClick={() => {
                             void handleCreateEvaluationTemplate('blank');
                           }}
                           disabled={busyAction === 'create-template-blank'}
-                        >
-                          {busyAction === 'create-template-blank'
-                            ? 'Creating...'
-                            : 'New blank template'}
-                        </button>
-                        <button
-                          className="secondary-button"
-                          type="button"
+                        />
+                        <IconLabelActionButton
+                          label={
+                            busyAction === 'create-template-default'
+                              ? 'Loading defaults...'
+                              : 'Load defaults'
+                          }
+                          icon="save"
                           onClick={() => {
                             void handleCreateEvaluationTemplate('default');
                           }}
                           disabled={busyAction === 'create-template-default'}
-                        >
-                          {busyAction === 'create-template-default'
-                            ? 'Loading defaults...'
-                            : 'Load defaults'}
-                        </button>
+                        />
                       </div>
 
                       <div className="stack-list template-list">
@@ -2811,21 +3325,26 @@ function App() {
                       {selectedEvaluationTemplate && evaluationTemplateDraft ? (
                         <>
                           <div className="action-row">
-                            <button
-                              className="secondary-button"
-                              type="button"
+                            <IconLabelActionButton
+                              label={
+                                busyAction === 'create-template-copy'
+                                  ? 'Copying template...'
+                                  : 'Copy template'
+                              }
+                              icon="add"
                               onClick={() => {
                                 void handleCreateEvaluationTemplate('copy');
                               }}
                               disabled={busyAction === 'create-template-copy'}
-                            >
-                              {busyAction === 'create-template-copy'
-                                ? 'Copying...'
-                                : 'Copy template'}
-                            </button>
-                            <button
-                              className="ghost-button"
-                              type="button"
+                            />
+                            <IconLabelActionButton
+                              label={
+                                busyAction ===
+                                `delete-template-${selectedEvaluationTemplate.id}`
+                                  ? 'Deleting template...'
+                                  : 'Delete template'
+                              }
+                              icon="delete"
                               onClick={() => {
                                 void handleDeleteSelectedEvaluationTemplate();
                               }}
@@ -2833,12 +3352,7 @@ function App() {
                                 busyAction ===
                                 `delete-template-${selectedEvaluationTemplate.id}`
                               }
-                            >
-                              {busyAction ===
-                              `delete-template-${selectedEvaluationTemplate.id}`
-                                ? 'Deleting...'
-                                : 'Delete template'}
-                            </button>
+                            />
                           </div>
 
                           <div className="stack-list template-guidance">
@@ -2895,13 +3409,11 @@ function App() {
                                   same way.
                                 </p>
                               </div>
-                              <button
-                                className="secondary-button"
-                                type="button"
+                              <IconLabelActionButton
+                                label="Add criterion"
+                                icon="add"
                                 onClick={addEvaluationCriterion}
-                              >
-                                Add criterion
-                              </button>
+                              />
                             </div>
 
                             <div className="criteria-list">
@@ -2915,18 +3427,17 @@ function App() {
                                         </p>
                                         <h3>{criterion.title}</h3>
                                       </div>
-                                      <button
-                                        className="ghost-button"
-                                        type="button"
+                                      <IconActionButton
+                                        label="Remove criterion"
+                                        icon="delete"
+                                        danger
                                         onClick={() => {
                                           removeEvaluationCriterion(criterion.id);
                                         }}
                                         disabled={
                                           evaluationTemplateDraft.criteria.length === 1
                                         }
-                                      >
-                                        Remove
-                                      </button>
+                                      />
                                     </div>
 
                                     <div className="criterion-settings-grid">
@@ -3013,9 +3524,14 @@ function App() {
 
                           <div className="footer-note">
                             <div className="action-row">
-                              <button
-                                className="primary-button"
-                                type="button"
+                              <IconLabelActionButton
+                                label={
+                                  busyAction ===
+                                  `save-template-${selectedEvaluationTemplate.id}`
+                                    ? 'Saving template...'
+                                    : 'Save template'
+                                }
+                                icon="save"
                                 onClick={() => {
                                   void handleSaveEvaluationTemplate();
                                 }}
@@ -3023,12 +3539,7 @@ function App() {
                                   busyAction ===
                                   `save-template-${selectedEvaluationTemplate.id}`
                                 }
-                              >
-                                {busyAction ===
-                                `save-template-${selectedEvaluationTemplate.id}`
-                                  ? 'Saving template...'
-                                  : 'Save template'}
-                              </button>
+                              />
                             </div>
                           </div>
                         </>
@@ -3453,6 +3964,8 @@ function App() {
               </article>
             ) : null}
 
+            {activeAdminSection === 'design-lab' ? <DesignLab /> : null}
+
             {activeAdminSection === 'profile' ? userProfileCard : null}
 
             {activeAdminSection === 'access' ? workspaceAccessCard : null}
@@ -3727,15 +4240,13 @@ function App() {
                       </h3>
                     </div>
                     {familyRole === 'parent' ? (
-                      <button
-                        className="secondary-button"
-                        type="button"
+                      <IconActionButton
+                        label="Add player"
+                        icon="add"
                         onClick={() => {
                           setSelectedPlayerId('new');
                         }}
-                      >
-                        Add player
-                      </button>
+                      />
                     ) : null}
                   </div>
 
@@ -3792,399 +4303,28 @@ function App() {
               ) : null}
 
               {familyRole && draftPlayer && activeUserSection === 'player' ? (
-                  <article className="card">
-                    <div className="card-header">
-                      <div>
-                        <p className="section-eyebrow">Player Profile</p>
-                        <h2>
-                          {draftPlayer.id
-                            ? getPlayerDisplayName(draftPlayer.profile) || 'Player profile'
-                            : 'Create player profile'}
-                        </h2>
-                        <p className="section-copy">
-                          Player profile details are managed separately from the
-                          intake form so linked parents and players can keep this
-                          record current over time.
-                        </p>
-                      </div>
-                      <span className="status-chip">
-                        {draftPlayer.id ? 'Saved record' : 'New player'}
-                      </span>
-                    </div>
-
-                    <div className="form-section">
-                      <h3>Basic details</h3>
-                      <div className="field-grid">
-                        <label className="field">
-                          <span>First name</span>
-                          <input
-                            type="text"
-                            value={draftPlayer.profile.firstName}
-                            onChange={(event) => {
-                              updateDraftPlayerNames('firstName', event.target.value);
-                            }}
-                            placeholder="First name"
-                          />
-                        </label>
-
-                        <label className="field">
-                          <span>Last name</span>
-                          <input
-                            type="text"
-                            value={draftPlayer.profile.lastName}
-                            onChange={(event) => {
-                              updateDraftPlayerNames('lastName', event.target.value);
-                            }}
-                            placeholder="Last name"
-                          />
-                        </label>
-
-                        <label className="field">
-                          <span>Birth year</span>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            value={draftPlayer.profile.birthYear}
-                            onChange={(event) => {
-                              updateDraftPlayerProfileField(
-                                'birthYear',
-                                event.target.value,
-                              );
-                            }}
-                            placeholder="e.g. 2011"
-                          />
-                        </label>
-
-                        <label className="field">
-                          <span>Gender</span>
-                          <select
-                            value={draftPlayer.profile.gender}
-                            onChange={(event) => {
-                              updateDraftPlayerProfileField('gender', event.target.value);
-                            }}
-                          >
-                            <option value="">Select</option>
-                            <option value="Male">Male</option>
-                            <option value="Female">Female</option>
-                            <option value="Non-binary">Non-binary</option>
-                            <option value="Prefer not to say">Prefer not to say</option>
-                          </select>
-                        </label>
-
-                        <label className="field">
-                          <span>Primary position</span>
-                          <select
-                            value={draftPlayer.profile.primaryPosition}
-                            onChange={(event) => {
-                              const nextValue = event.target.value;
-                              updateDraftPlayerProfileField(
-                                'primaryPosition',
-                                nextValue,
-                              );
-                              updateDraftPlayerProfileField('positions', nextValue);
-                            }}
-                          >
-                            <option value="">Select</option>
-                            <option value="Forward">Forward</option>
-                            <option value="Center">Center</option>
-                            <option value="Wing">Wing</option>
-                            <option value="Defense">Defense</option>
-                            <option value="Goalie">Goalie</option>
-                          </select>
-                        </label>
-
-                        <label className="field">
-                          <span>Handedness</span>
-                          <select
-                            value={draftPlayer.profile.handedness}
-                            onChange={(event) => {
-                              updateDraftPlayerProfileField(
-                                'handedness',
-                                event.target.value,
-                              );
-                            }}
-                          >
-                            <option value="">Select</option>
-                            <option value="Left">Left</option>
-                            <option value="Right">Right</option>
-                          </select>
-                        </label>
-
-                        <label className="field">
-                          <span>First year playing hockey</span>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            value={draftPlayer.profile.firstYearPlayingHockey}
-                            onChange={(event) => {
-                              updateDraftPlayerProfileField(
-                                'firstYearPlayingHockey',
-                                event.target.value,
-                              );
-                            }}
-                            placeholder="e.g. 2018"
-                          />
-                        </label>
-                      </div>
-                    </div>
-
-                    <div className="form-section">
-                      <h3>Contact and notifications</h3>
-                      <div className="field-grid">
-                        <label className="field">
-                          <span>Player contact email</span>
-                          <input
-                            type="email"
-                            value={draftPlayer.profile.bestContactEmail}
-                            onChange={(event) => {
-                              updateDraftPlayerProfileField(
-                                'bestContactEmail',
-                                event.target.value,
-                              );
-                            }}
-                            placeholder="name@example.com"
-                          />
-                        </label>
-
-                        <label className="field">
-                          <span>Player phone number</span>
-                          <input
-                            type="tel"
-                            value={draftPlayer.profile.phoneNumber}
-                            onChange={(event) => {
-                              updateDraftPlayerProfileField(
-                                'phoneNumber',
-                                event.target.value,
-                              );
-                            }}
-                            placeholder="Optional"
-                          />
-                        </label>
-                      </div>
-
-                      <label className="checkbox-field">
-                        <input
-                          type="checkbox"
-                          checked={draftPlayer.profile.smsOptIn}
-                          onChange={(event) => {
-                            updateDraftPlayerProfileField(
-                              'smsOptIn',
-                              event.target.checked,
-                            );
-                          }}
-                        />
-                        <div>
-                          <strong>Allow text message notifications</strong>
-                          <p className="helper-copy">
-                            Turn this on only if a phone number has been added.
-                          </p>
-                        </div>
-                      </label>
-                    </div>
-
-                    <div className="form-section">
-                      <h3>Latest height and weight</h3>
-                      <div className="measure-grid">
-                        <label className="field">
-                          <span>Height (ft)</span>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            value={draftPlayer.profile.latestHeightFeet}
-                            onChange={(event) => {
-                              updateDraftPlayerProfileField(
-                                'latestHeightFeet',
-                                event.target.value,
-                              );
-                            }}
-                            placeholder="5"
-                          />
-                        </label>
-
-                        <label className="field">
-                          <span>Height (in)</span>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            value={draftPlayer.profile.latestHeightInches}
-                            onChange={(event) => {
-                              updateDraftPlayerProfileField(
-                                'latestHeightInches',
-                                event.target.value,
-                              );
-                            }}
-                            placeholder="6"
-                          />
-                        </label>
-
-                        <label className="field">
-                          <span>Weight (lb)</span>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            value={draftPlayer.profile.latestWeightPounds}
-                            onChange={(event) => {
-                              updateDraftPlayerProfileField(
-                                'latestWeightPounds',
-                                event.target.value,
-                              );
-                            }}
-                            placeholder="140"
-                          />
-                        </label>
-                      </div>
-
-                      {draftPlayer.profile.physicalHistory.length > 0 ? (
-                        <p className="helper-copy">
-                          Latest measurement recorded{' '}
-                          {formatTimestamp(
-                            getLatestPhysicalEntry(draftPlayer.profile.physicalHistory)
-                              ?.recordedAt ?? null,
-                          )}
-                          . Prior entries stay stored for future growth history.
-                        </p>
-                      ) : null}
-                    </div>
-
-                    <div className="form-section">
-                      <div className="team-history-header">
-                        <div>
-                          <h3>Previous teams</h3>
-                          <p className="helper-copy">
-                            Add as many entries as needed. Use season labels like
-                            2025-26 or 2026-27.
-                          </p>
-                        </div>
-                        <button
-                          className="secondary-button"
-                          type="button"
-                          onClick={addTeamHistoryEntry}
-                        >
-                          Add team
-                        </button>
-                      </div>
-
-                      <datalist id="season-options">
-                        {recentSeasonOptions.map((seasonLabel) => (
-                          <option key={seasonLabel} value={seasonLabel} />
-                        ))}
-                      </datalist>
-
-                      <div className="team-history-list">
-                        {draftPlayer.profile.teamHistory.length === 0 ? (
-                          <div className="stack-card">
-                            <div>
-                              <strong>No team history added yet</strong>
-                              <p>
-                                Add one or more recent teams, including spring,
-                                summer, or tournament teams in the same season
-                                when needed.
-                              </p>
-                            </div>
-                          </div>
-                        ) : (
-                          draftPlayer.profile.teamHistory.map((entry) => (
-                            <div key={entry.id} className="team-history-row">
-                              <label className="field">
-                                <span>Season</span>
-                                <input
-                                  type="text"
-                                  list="season-options"
-                                  value={entry.seasonLabel}
-                                  onChange={(event) => {
-                                    updateTeamHistoryEntry(
-                                      entry.id,
-                                      'seasonLabel',
-                                      event.target.value,
-                                    );
-                                  }}
-                                  placeholder="2026-27"
-                                />
-                              </label>
-
-                              <label className="field">
-                                <span>Team name</span>
-                                <input
-                                  type="text"
-                                  value={entry.teamName}
-                                  onChange={(event) => {
-                                    updateTeamHistoryEntry(
-                                      entry.id,
-                                      'teamName',
-                                      event.target.value,
-                                    );
-                                  }}
-                                  placeholder="NC Golden Bears 14U AA"
-                                />
-                              </label>
-
-                              <label className="field">
-                                <span>Position played</span>
-                                <input
-                                  type="text"
-                                  value={entry.positionPlayed}
-                                  onChange={(event) => {
-                                    updateTeamHistoryEntry(
-                                      entry.id,
-                                      'positionPlayed',
-                                      event.target.value,
-                                    );
-                                  }}
-                                  placeholder="Forward"
-                                />
-                              </label>
-
-                              <div className="team-history-actions">
-                                <button
-                                  className="ghost-button"
-                                  type="button"
-                                  onClick={() => {
-                                    removeTeamHistoryEntry(entry.id);
-                                  }}
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="footer-note">
-                      <p className="helper-copy">
-                        Save the player profile any time. Intake submission stays
-                        separate below.
-                      </p>
-                      <div className="action-row">
-                        <button
-                          className="secondary-button"
-                          type="button"
-                          onClick={() => {
-                            void handleSavePlayer(
-                              selectedPlayer?.intake.status === 'submitted'
-                                ? 'submitted'
-                                : 'draft',
-                            );
-                          }}
-                          disabled={
-                            busyAction === 'create-draft' ||
-                            busyAction === 'update-draft' ||
-                            busyAction === 'create-submitted' ||
-                            busyAction === 'update-submitted'
-                          }
-                        >
-                          {busyAction === 'create-draft' ||
-                          busyAction === 'update-draft' ||
-                          busyAction === 'create-submitted' ||
-                          busyAction === 'update-submitted'
-                            ? 'Saving...'
-                            : 'Save player profile'}
-                        </button>
-                      </div>
-                    </div>
-                  </article>
-
+                <PlayerProfileCard
+                  draftPlayer={draftPlayer}
+                  busyAction={busyAction}
+                  recentSeasonOptions={recentSeasonOptions}
+                  onNameChange={updateDraftPlayerNames}
+                  onProfileFieldChange={updateDraftPlayerProfileField}
+                  onCommitName={commitExistingPlayerName}
+                  onCommitField={commitExistingPlayerProfileField}
+                  onCommitPrimaryPosition={commitExistingPlayerPrimaryPosition}
+                  onAddTeamHistoryEntry={addTeamHistoryEntry}
+                  onUpdateTeamHistoryEntry={updateTeamHistoryEntry}
+                  onRemoveTeamHistoryEntry={removeTeamHistoryEntry}
+                  onSaveProfile={() => {
+                    void savePlayerDraft(
+                      draftPlayer,
+                      draftPlayer.intakeStatus,
+                      {
+                        successMessage: 'The player profile has been saved.',
+                      },
+                    );
+                  }}
+                />
               ) : null}
 
               {familyRole && draftPlayer && activeUserSection === 'intake' ? (
@@ -4623,14 +4763,126 @@ function QuestionBlock({
   );
 }
 
+function InlineEditableField({
+  editId,
+  label,
+  value,
+  placeholder = 'Not set yet',
+  displayValue,
+  inputType = 'text',
+  inputMode,
+  options,
+  activeEditId,
+  onStartEditing,
+  onStopEditing,
+  onCommit,
+}: {
+  editId: string;
+  label: string;
+  value: string;
+  placeholder?: string;
+  displayValue?: string;
+  inputType?: 'text' | 'email' | 'tel';
+  inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'];
+  options?: Array<{ value: string; label: string }>;
+  activeEditId: string | null;
+  onStartEditing: (editId: string) => void;
+  onStopEditing: () => void;
+  onCommit: (value: string) => void;
+}) {
+  const isEditing = activeEditId === editId;
+  const [draftValue, setDraftValue] = useState(value);
+
+  function beginEditing(): void {
+    setDraftValue(value);
+    onStartEditing(editId);
+  }
+
+  function commitValue(): void {
+    const nextValue = draftValue.trim();
+    onStopEditing();
+    if (nextValue === value.trim()) return;
+    onCommit(nextValue);
+  }
+
+  const presentedValue =
+    displayValue
+    ?? options?.find((option) => option.value === value)?.label
+    ?? value
+    ?? '';
+
+  return (
+    <div
+      className={`inline-field ${isEditing ? 'inline-field--editing' : ''}`}
+      role={isEditing ? undefined : 'button'}
+      tabIndex={isEditing ? -1 : 0}
+      onClick={() => {
+        if (!isEditing) beginEditing();
+      }}
+      onKeyDown={(event) => {
+        if (isEditing) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          beginEditing();
+        }
+      }}
+    >
+      <span className="inline-field__label">{label}</span>
+      {isEditing ? (
+        options ? (
+          <select
+            autoFocus
+            value={draftValue}
+            onChange={(event) => {
+              setDraftValue(event.target.value);
+            }}
+            onBlur={commitValue}
+          >
+            <option value="">Select</option>
+            {options.map((option) => (
+              <option key={`${editId}-${option.value}`} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            autoFocus
+            type={inputType}
+            inputMode={inputMode}
+            value={draftValue}
+            onChange={(event) => {
+              setDraftValue(event.target.value);
+            }}
+            onBlur={commitValue}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.currentTarget.blur();
+              }
+
+              if (event.key === 'Escape') {
+                setDraftValue(value);
+                onStopEditing();
+              }
+            }}
+          />
+        )
+      ) : (
+        <strong>{presentedValue || placeholder}</strong>
+      )}
+    </div>
+  );
+}
+
 function UserProfileCard({
   signInEmail,
   userDraft,
   busyAction,
-  onFieldChange,
-  onSmsOptInChange,
-  onSave,
+  onFieldCommit,
+  onSmsOptInCommit,
 }: UserProfileCardProps) {
+  const [activeEditId, setActiveEditId] = useState<string | null>(null);
+
   return (
     <article className="card">
       <div className="card-header">
@@ -4642,87 +4894,1353 @@ function UserProfileCard({
             personal and support future email or text notifications.
           </p>
         </div>
+        <span className="status-chip">
+          {busyAction === 'save-user-profile' ? 'Saving...' : 'Inline autosave'}
+        </span>
       </div>
 
-      <div className="field-grid">
-        <label className="field">
-          <span>First name</span>
-          <input
-            type="text"
-            value={userDraft.firstName}
-            onChange={(event) => {
-              onFieldChange('firstName', event.target.value);
-            }}
-            placeholder="First name"
-          />
-        </label>
-
-        <label className="field">
-          <span>Last name</span>
-          <input
-            type="text"
-            value={userDraft.lastName}
-            onChange={(event) => {
-              onFieldChange('lastName', event.target.value);
-            }}
-            placeholder="Last name"
-          />
-        </label>
-
-        <label className="field">
-          <span>Contact email</span>
-          <input
-            type="email"
-            value={userDraft.contactEmail}
-            onChange={(event) => {
-              onFieldChange('contactEmail', event.target.value);
-            }}
-            placeholder="name@example.com"
-          />
-        </label>
-
-        <label className="field">
-          <span>Phone number</span>
-          <input
-            type="tel"
-            value={userDraft.phoneNumber}
-            onChange={(event) => {
-              onFieldChange('phoneNumber', event.target.value);
-            }}
-            placeholder="Optional"
-          />
-        </label>
-      </div>
-
-      <label className="checkbox-field">
-        <input
-          type="checkbox"
-          checked={userDraft.smsOptIn}
-          onChange={(event) => {
-            onSmsOptInChange(event.target.checked);
+      <div className="inline-field-grid">
+        <InlineEditableField
+          editId="user-first-name"
+          label="First name"
+          value={userDraft.firstName}
+          placeholder="First name"
+          activeEditId={activeEditId}
+          onStartEditing={setActiveEditId}
+          onStopEditing={() => {
+            setActiveEditId(null);
+          }}
+          onCommit={(value) => {
+            onFieldCommit('firstName', value);
           }}
         />
+        <InlineEditableField
+          editId="user-last-name"
+          label="Last name"
+          value={userDraft.lastName}
+          placeholder="Last name"
+          activeEditId={activeEditId}
+          onStartEditing={setActiveEditId}
+          onStopEditing={() => {
+            setActiveEditId(null);
+          }}
+          onCommit={(value) => {
+            onFieldCommit('lastName', value);
+          }}
+        />
+        <InlineEditableField
+          editId="user-contact-email"
+          label="Contact email"
+          value={userDraft.contactEmail}
+          placeholder="name@example.com"
+          inputType="email"
+          activeEditId={activeEditId}
+          onStartEditing={setActiveEditId}
+          onStopEditing={() => {
+            setActiveEditId(null);
+          }}
+          onCommit={(value) => {
+            onFieldCommit('contactEmail', value);
+          }}
+        />
+        <InlineEditableField
+          editId="user-phone"
+          label="Phone number"
+          value={userDraft.phoneNumber}
+          placeholder="Optional"
+          inputType="tel"
+          activeEditId={activeEditId}
+          onStartEditing={setActiveEditId}
+          onStopEditing={() => {
+            setActiveEditId(null);
+          }}
+          onCommit={(value) => {
+            onFieldCommit('phoneNumber', value);
+          }}
+        />
+        <div className="inline-field inline-field--readonly">
+          <span className="inline-field__label">Sign-in email</span>
+          <strong>{signInEmail}</strong>
+        </div>
+        <label className="inline-toggle">
+          <input
+            type="checkbox"
+            checked={userDraft.smsOptIn}
+            onChange={(event) => {
+              onSmsOptInCommit(event.target.checked);
+            }}
+          />
+          <div>
+            <span className="inline-field__label">Text notifications</span>
+            <strong>{userDraft.smsOptIn ? 'Enabled' : 'Not enabled'}</strong>
+          </div>
+        </label>
+      </div>
+    </article>
+  );
+}
+
+function IconGlyph({ name }: { name: 'edit' | 'add' | 'delete' | 'save' }) {
+  if (name === 'edit') {
+    return (
+      <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+        <path d="M13.9 3.1a1.9 1.9 0 0 1 2.7 2.7l-8.8 8.8-3.4.7.7-3.4 8.8-8.8Z" />
+        <path d="m12.8 4.2 3 3" />
+      </svg>
+    );
+  }
+
+  if (name === 'add') {
+    return (
+      <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+        <path d="M10 4.5v11" />
+        <path d="M4.5 10h11" />
+      </svg>
+    );
+  }
+
+  if (name === 'delete') {
+    return (
+      <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+        <path d="M5.5 5.5 14.5 14.5" />
+        <path d="M14.5 5.5 5.5 14.5" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d="m4.5 10 3.4 3.4 7.6-7.8" />
+    </svg>
+  );
+}
+
+function IconActionButton({
+  label,
+  icon,
+  danger = false,
+  disabled = false,
+  onClick,
+}: {
+  label: string;
+  icon: 'edit' | 'add' | 'delete' | 'save';
+  danger?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      className={`icon-action-button ${danger ? 'icon-action-button--danger' : ''}`}
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      <IconGlyph name={icon} />
+    </button>
+  );
+}
+
+function IconLabelActionButton({
+  label,
+  icon,
+  disabled = false,
+  onClick,
+}: {
+  label: string;
+  icon: 'edit' | 'add' | 'delete' | 'save';
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      className="icon-label-button"
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      <IconGlyph name={icon} />
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function PlayerProfileCard({
+  draftPlayer,
+  busyAction,
+  recentSeasonOptions,
+  onNameChange,
+  onProfileFieldChange,
+  onCommitName,
+  onCommitField,
+  onCommitPrimaryPosition,
+  onAddTeamHistoryEntry,
+  onUpdateTeamHistoryEntry,
+  onRemoveTeamHistoryEntry,
+  onSaveProfile,
+}: {
+  draftPlayer: EditablePlayerState;
+  busyAction: string | null;
+  recentSeasonOptions: string[];
+  onNameChange: (field: 'firstName' | 'lastName', value: string) => void;
+  onProfileFieldChange: <K extends keyof PlayerProfileInput>(
+    field: K,
+    value: PlayerProfileInput[K],
+  ) => void;
+  onCommitName: (field: 'firstName' | 'lastName', value: string) => void;
+  onCommitField: <K extends keyof PlayerProfileInput>(
+    field: K,
+    value: PlayerProfileInput[K],
+  ) => void;
+  onCommitPrimaryPosition: (value: string) => void;
+  onAddTeamHistoryEntry: () => void;
+  onUpdateTeamHistoryEntry: (
+    entryId: string,
+    field: keyof Omit<PlayerTeamHistoryEntry, 'id'>,
+    value: string,
+  ) => void;
+  onRemoveTeamHistoryEntry: (entryId: string) => void;
+  onSaveProfile: () => void;
+}) {
+  const [activeEditId, setActiveEditId] = useState<string | null>(null);
+  const isSavedRecord = draftPlayer.id !== null;
+  const latestPhysicalEntry = getLatestPhysicalEntry(draftPlayer.profile.physicalHistory);
+  const isSavingProfile =
+    busyAction === 'create-not-started'
+    || busyAction === 'create-draft'
+    || busyAction === 'update-not-started'
+    || busyAction === 'update-draft'
+    || busyAction === 'update-submitted'
+    || busyAction === 'create-profile'
+    || busyAction === 'update-profile';
+
+  return (
+    <article className="card">
+      <div className="card-header">
         <div>
-          <strong>Allow text message notifications</strong>
-          <p className="helper-copy">
-            Sign-in email: {signInEmail}. Use contact details above for future
-            notifications.
+          <p className="section-eyebrow">Player Profile</p>
+          <h2>
+            {draftPlayer.id
+              ? getPlayerDisplayName(draftPlayer.profile) || 'Player profile'
+              : 'Create player profile'}
+          </h2>
+          <p className="section-copy">
+            Player profile details stay separate from the intake form so linked
+            parents and players can keep this record current over time.
           </p>
         </div>
-      </label>
+        <span className="status-chip">
+          {isSavedRecord
+            ? isSavingProfile
+              ? 'Saving...'
+              : 'Inline autosave'
+            : 'New player'}
+        </span>
+      </div>
+
+      {isSavedRecord ? (
+        <>
+          <div className="inline-field-grid">
+            <InlineEditableField
+              editId="player-first-name"
+              label="First name"
+              value={draftPlayer.profile.firstName}
+              placeholder="First name"
+              activeEditId={activeEditId}
+              onStartEditing={setActiveEditId}
+              onStopEditing={() => {
+                setActiveEditId(null);
+              }}
+              onCommit={(value) => {
+                onCommitName('firstName', value);
+              }}
+            />
+            <InlineEditableField
+              editId="player-last-name"
+              label="Last name"
+              value={draftPlayer.profile.lastName}
+              placeholder="Last name"
+              activeEditId={activeEditId}
+              onStartEditing={setActiveEditId}
+              onStopEditing={() => {
+                setActiveEditId(null);
+              }}
+              onCommit={(value) => {
+                onCommitName('lastName', value);
+              }}
+            />
+            <InlineEditableField
+              editId="player-birth-year"
+              label="Birth year"
+              value={draftPlayer.profile.birthYear}
+              placeholder="e.g. 2011"
+              inputMode="numeric"
+              activeEditId={activeEditId}
+              onStartEditing={setActiveEditId}
+              onStopEditing={() => {
+                setActiveEditId(null);
+              }}
+              onCommit={(value) => {
+                onCommitField('birthYear', value);
+              }}
+            />
+            <InlineEditableField
+              editId="player-gender"
+              label="Gender"
+              value={draftPlayer.profile.gender}
+              options={playerGenderOptions}
+              activeEditId={activeEditId}
+              onStartEditing={setActiveEditId}
+              onStopEditing={() => {
+                setActiveEditId(null);
+              }}
+              onCommit={(value) => {
+                onCommitField('gender', value);
+              }}
+            />
+            <InlineEditableField
+              editId="player-position"
+              label="Primary position"
+              value={draftPlayer.profile.primaryPosition}
+              options={playerPositionOptions}
+              activeEditId={activeEditId}
+              onStartEditing={setActiveEditId}
+              onStopEditing={() => {
+                setActiveEditId(null);
+              }}
+              onCommit={(value) => {
+                onCommitPrimaryPosition(value);
+              }}
+            />
+            <InlineEditableField
+              editId="player-handedness"
+              label="Handedness"
+              value={draftPlayer.profile.handedness}
+              options={handednessOptions}
+              activeEditId={activeEditId}
+              onStartEditing={setActiveEditId}
+              onStopEditing={() => {
+                setActiveEditId(null);
+              }}
+              onCommit={(value) => {
+                onCommitField('handedness', value);
+              }}
+            />
+            <InlineEditableField
+              editId="player-first-year"
+              label="First year playing hockey"
+              value={draftPlayer.profile.firstYearPlayingHockey}
+              placeholder="e.g. 2018"
+              inputMode="numeric"
+              activeEditId={activeEditId}
+              onStartEditing={setActiveEditId}
+              onStopEditing={() => {
+                setActiveEditId(null);
+              }}
+              onCommit={(value) => {
+                onCommitField('firstYearPlayingHockey', value);
+              }}
+            />
+            <InlineEditableField
+              editId="player-contact-email"
+              label="Player contact email"
+              value={draftPlayer.profile.bestContactEmail}
+              placeholder="name@example.com"
+              inputType="email"
+              activeEditId={activeEditId}
+              onStartEditing={setActiveEditId}
+              onStopEditing={() => {
+                setActiveEditId(null);
+              }}
+              onCommit={(value) => {
+                onCommitField('bestContactEmail', value);
+              }}
+            />
+            <InlineEditableField
+              editId="player-phone-number"
+              label="Player phone number"
+              value={draftPlayer.profile.phoneNumber}
+              placeholder="Optional"
+              inputType="tel"
+              activeEditId={activeEditId}
+              onStartEditing={setActiveEditId}
+              onStopEditing={() => {
+                setActiveEditId(null);
+              }}
+              onCommit={(value) => {
+                onCommitField('phoneNumber', value);
+              }}
+            />
+            <label className="inline-toggle">
+              <input
+                type="checkbox"
+                checked={draftPlayer.profile.smsOptIn}
+                onChange={(event) => {
+                  onCommitField('smsOptIn', event.target.checked);
+                }}
+              />
+              <div>
+                <span className="inline-field__label">Text notifications</span>
+                <strong>{draftPlayer.profile.smsOptIn ? 'Enabled' : 'Not enabled'}</strong>
+              </div>
+            </label>
+          </div>
+
+          <div className="metric-card-grid">
+            <InlineEditableField
+              editId="player-height-feet"
+              label="Height (ft)"
+              value={draftPlayer.profile.latestHeightFeet}
+              placeholder="5"
+              inputMode="numeric"
+              activeEditId={activeEditId}
+              onStartEditing={setActiveEditId}
+              onStopEditing={() => {
+                setActiveEditId(null);
+              }}
+              onCommit={(value) => {
+                onCommitField('latestHeightFeet', value);
+              }}
+            />
+            <InlineEditableField
+              editId="player-height-inches"
+              label="Height (in)"
+              value={draftPlayer.profile.latestHeightInches}
+              placeholder="6"
+              inputMode="numeric"
+              activeEditId={activeEditId}
+              onStartEditing={setActiveEditId}
+              onStopEditing={() => {
+                setActiveEditId(null);
+              }}
+              onCommit={(value) => {
+                onCommitField('latestHeightInches', value);
+              }}
+            />
+            <InlineEditableField
+              editId="player-weight"
+              label="Weight (lb)"
+              value={draftPlayer.profile.latestWeightPounds}
+              placeholder="140"
+              inputMode="numeric"
+              activeEditId={activeEditId}
+              onStartEditing={setActiveEditId}
+              onStopEditing={() => {
+                setActiveEditId(null);
+              }}
+              onCommit={(value) => {
+                onCommitField('latestWeightPounds', value);
+              }}
+            />
+          </div>
+
+          {latestPhysicalEntry ? (
+            <p className="helper-copy profile-footnote">
+              Latest measurement recorded {formatTimestamp(latestPhysicalEntry.recordedAt)}.
+              Prior entries stay stored for future growth history.
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <div className="form-section">
+          <h3>Basic details</h3>
+          <div className="field-grid">
+            <label className="field">
+              <span>First name</span>
+              <input
+                type="text"
+                value={draftPlayer.profile.firstName}
+                onChange={(event) => {
+                  onNameChange('firstName', event.target.value);
+                }}
+                placeholder="First name"
+              />
+            </label>
+
+            <label className="field">
+              <span>Last name</span>
+              <input
+                type="text"
+                value={draftPlayer.profile.lastName}
+                onChange={(event) => {
+                  onNameChange('lastName', event.target.value);
+                }}
+                placeholder="Last name"
+              />
+            </label>
+
+            <label className="field">
+              <span>Birth year</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={draftPlayer.profile.birthYear}
+                onChange={(event) => {
+                  onProfileFieldChange('birthYear', event.target.value);
+                }}
+                placeholder="e.g. 2011"
+              />
+            </label>
+
+            <label className="field">
+              <span>Gender</span>
+              <select
+                value={draftPlayer.profile.gender}
+                onChange={(event) => {
+                  onProfileFieldChange('gender', event.target.value);
+                }}
+              >
+                <option value="">Select</option>
+                {playerGenderOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Primary position</span>
+              <select
+                value={draftPlayer.profile.primaryPosition}
+                onChange={(event) => {
+                  onProfileFieldChange('primaryPosition', event.target.value);
+                  onProfileFieldChange('positions', event.target.value);
+                }}
+              >
+                <option value="">Select</option>
+                {playerPositionOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Handedness</span>
+              <select
+                value={draftPlayer.profile.handedness}
+                onChange={(event) => {
+                  onProfileFieldChange('handedness', event.target.value);
+                }}
+              >
+                <option value="">Select</option>
+                {handednessOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>First year playing hockey</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={draftPlayer.profile.firstYearPlayingHockey}
+                onChange={(event) => {
+                  onProfileFieldChange('firstYearPlayingHockey', event.target.value);
+                }}
+                placeholder="e.g. 2018"
+              />
+            </label>
+
+            <label className="field">
+              <span>Player contact email</span>
+              <input
+                type="email"
+                value={draftPlayer.profile.bestContactEmail}
+                onChange={(event) => {
+                  onProfileFieldChange('bestContactEmail', event.target.value);
+                }}
+                placeholder="name@example.com"
+              />
+            </label>
+
+            <label className="field">
+              <span>Player phone number</span>
+              <input
+                type="tel"
+                value={draftPlayer.profile.phoneNumber}
+                onChange={(event) => {
+                  onProfileFieldChange('phoneNumber', event.target.value);
+                }}
+                placeholder="Optional"
+              />
+            </label>
+          </div>
+
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={draftPlayer.profile.smsOptIn}
+              onChange={(event) => {
+                onProfileFieldChange('smsOptIn', event.target.checked);
+              }}
+            />
+            <div>
+              <strong>Allow text message notifications</strong>
+              <p className="helper-copy">Turn this on only if a phone number has been added.</p>
+            </div>
+          </label>
+
+          <div className="measure-grid">
+            <label className="field">
+              <span>Height (ft)</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={draftPlayer.profile.latestHeightFeet}
+                onChange={(event) => {
+                  onProfileFieldChange('latestHeightFeet', event.target.value);
+                }}
+                placeholder="5"
+              />
+            </label>
+            <label className="field">
+              <span>Height (in)</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={draftPlayer.profile.latestHeightInches}
+                onChange={(event) => {
+                  onProfileFieldChange('latestHeightInches', event.target.value);
+                }}
+                placeholder="6"
+              />
+            </label>
+            <label className="field">
+              <span>Weight (lb)</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={draftPlayer.profile.latestWeightPounds}
+                onChange={(event) => {
+                  onProfileFieldChange('latestWeightPounds', event.target.value);
+                }}
+                placeholder="140"
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
+      <div className="form-section">
+        <div className="team-history-header">
+          <div>
+            <h3>Previous teams</h3>
+            <p className="helper-copy">
+              Add as many entries as needed. Use season labels like 2025-26 or 2026-27.
+            </p>
+          </div>
+          <div className="icon-action-row">
+            <IconActionButton
+              label="Add team history entry"
+              icon="add"
+              onClick={onAddTeamHistoryEntry}
+            />
+          </div>
+        </div>
+
+        <datalist id="season-options">
+          {recentSeasonOptions.map((seasonLabel) => (
+            <option key={seasonLabel} value={seasonLabel} />
+          ))}
+        </datalist>
+
+        <div className="team-history-list">
+          {draftPlayer.profile.teamHistory.length === 0 ? (
+            <div className="stack-card">
+              <div>
+                <strong>No team history added yet</strong>
+                <p>
+                  Add one or more recent teams, including spring, summer, or
+                  tournament teams in the same season when needed.
+                </p>
+              </div>
+            </div>
+          ) : (
+            draftPlayer.profile.teamHistory.map((entry) => (
+              <div key={entry.id} className="team-history-row">
+                <label className="field">
+                  <span>Season</span>
+                  <input
+                    type="text"
+                    list="season-options"
+                    value={entry.seasonLabel}
+                    onChange={(event) => {
+                      onUpdateTeamHistoryEntry(
+                        entry.id,
+                        'seasonLabel',
+                        event.target.value,
+                      );
+                    }}
+                    placeholder="2026-27"
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Team name</span>
+                  <input
+                    type="text"
+                    value={entry.teamName}
+                    onChange={(event) => {
+                      onUpdateTeamHistoryEntry(entry.id, 'teamName', event.target.value);
+                    }}
+                    placeholder="NC Golden Bears 14U AA"
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Position played</span>
+                  <input
+                    type="text"
+                    value={entry.positionPlayed}
+                    onChange={(event) => {
+                      onUpdateTeamHistoryEntry(
+                        entry.id,
+                        'positionPlayed',
+                        event.target.value,
+                      );
+                    }}
+                    placeholder="Forward"
+                  />
+                </label>
+
+                <div className="team-history-actions">
+                  <IconActionButton
+                    label="Delete team history entry"
+                    icon="delete"
+                    danger
+                    onClick={() => {
+                      onRemoveTeamHistoryEntry(entry.id);
+                    }}
+                  />
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
 
       <div className="footer-note">
-        <div className="action-row">
+        <div className="footer-actions footer-actions--compact">
           <button
-            className="secondary-button"
+            className="icon-label-button"
             type="button"
-            onClick={onSave}
-            disabled={busyAction === 'save-user-profile'}
+            onClick={onSaveProfile}
+            disabled={isSavingProfile}
           >
-            {busyAction === 'save-user-profile'
-              ? 'Saving profile...'
-              : 'Save profile'}
+            <IconGlyph name="save" />
+            <span>{isSavingProfile ? 'Saving...' : 'Save profile changes'}</span>
           </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function DesignLab() {
+  const [activeView, setActiveView] = useState<DesignLabView>('family-hub');
+  const [activePanel, setActivePanel] = useState<DesignLabPanel>('actions');
+  const [selectedPlayerId, setSelectedPlayerId] = useState<string>(
+    DESIGN_LAB_PLAYERS[0]?.id ?? '',
+  );
+  const [profileDraft, setProfileDraft] = useState<DesignLabProfileState>({
+    ...DESIGN_LAB_PROFILE_INITIAL,
+  });
+  const [editingField, setEditingField] = useState<DesignLabProfileField | null>(
+    null,
+  );
+  const [autosaveMessage, setAutosaveMessage] = useState(
+    'Preview autosave is on for single-value fields.',
+  );
+  const [opsDensity, setOpsDensity] = useState<DesignLabDensity>('compact');
+  const [opsGroupFilter, setOpsGroupFilter] = useState<string>('all');
+
+  const selectedPlayer =
+    DESIGN_LAB_PLAYERS.find((player) => player.id === selectedPlayerId)
+    ?? DESIGN_LAB_PLAYERS[0];
+
+  const visibleRoster = DESIGN_LAB_ROSTER.filter((entry) =>
+    opsGroupFilter === 'all' ? true : entry.groupName === opsGroupFilter,
+  );
+
+  const opsGroupOptions = ['all', ...new Set(DESIGN_LAB_ROSTER.map((entry) => entry.groupName))];
+
+  function handleSelectPlayer(playerId: string, nextView?: DesignLabView): void {
+    setSelectedPlayerId(playerId);
+    if (nextView) setActiveView(nextView);
+  }
+
+  function handleInlineFieldChange(
+    field: DesignLabProfileField,
+    value: string,
+  ): void {
+    setProfileDraft((currentValue) => ({
+      ...currentValue,
+      [field]: value,
+    }));
+  }
+
+  function handleInlineFieldBlur(
+    field: DesignLabProfileField,
+    label: string,
+  ): void {
+    setEditingField((currentValue) => (currentValue === field ? null : currentValue));
+    setAutosaveMessage(`${label} autosaved in preview.`);
+  }
+
+  function renderInlineField(
+    field: DesignLabProfileField,
+    label: string,
+  ) {
+    const isEditing = editingField === field;
+    const value = profileDraft[field];
+
+    return (
+      <div
+        key={field}
+        className={`design-inline-cell ${
+          isEditing ? 'design-inline-cell--editing' : ''
+        }`}
+        role={isEditing ? undefined : 'button'}
+        tabIndex={isEditing ? -1 : 0}
+        onClick={() => {
+          if (!isEditing) setEditingField(field);
+        }}
+        onKeyDown={(event) => {
+          if (isEditing) return;
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            setEditingField(field);
+          }
+        }}
+      >
+        <span className="design-inline-cell__label">{label}</span>
+        {isEditing ? (
+          <div className="design-inline-cell__editor">
+            <input
+              autoFocus
+              type="text"
+              value={value}
+              onChange={(event) => {
+                handleInlineFieldChange(field, event.target.value);
+              }}
+              onBlur={() => {
+                handleInlineFieldBlur(field, label);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.currentTarget.blur();
+                }
+
+                if (event.key === 'Escape') {
+                  setEditingField(null);
+                }
+              }}
+            />
+          </div>
+        ) : (
+          <strong>{value || 'Not set yet'}</strong>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <article className="card design-lab-shell">
+      <div className="card-header">
+        <div>
+          <p className="section-eyebrow">Design Lab</p>
+          <h3>Premium workflow previews</h3>
+          <p className="section-copy">
+            Synthetic data only. Use these mockups to choose the interaction
+            model we should bring into the live portal next.
+          </p>
+        </div>
+        <span className="status-chip">Preview only</span>
+      </div>
+
+      <div className="design-lab-nav">
+        {([
+          [
+            'family-hub',
+            'Pattern A',
+            'Action dock + quick-open player navigation for parents and players',
+          ],
+          [
+            'profile-inline',
+            'Pattern B',
+            'Read-first profile rows with inline auto-save for simple fields',
+          ],
+          [
+            'ops-command',
+            'Pattern C',
+            'Compact command center for dense tryout and staff operations',
+          ],
+        ] as Array<[DesignLabView, string, string]>).map(([view, label, description]) => (
+          <button
+            key={view}
+            className={`design-lab-nav__button ${
+              activeView === view ? 'design-lab-nav__button--active' : ''
+            }`}
+            type="button"
+            onClick={() => {
+              setActiveView(view);
+            }}
+          >
+            <strong>{label}</strong>
+            <span>{description}</span>
+          </button>
+        ))}
+      </div>
+
+      {activeView === 'family-hub' ? (
+        <div className="design-canvas">
+          <section className="design-hero">
+            <div>
+              <p className="design-hero__eyebrow">Pattern A / Family hub</p>
+              <h4>Replace low-value counters with actionable summary controls</h4>
+              <p>
+                The summary strip becomes a compact dock. Each chip opens the
+                next useful thing, and linked players become direct quick-open
+                records instead of static totals.
+              </p>
+            </div>
+            <div className="design-pattern-row">
+              <span className="design-pattern-chip">Control pack: Action dock</span>
+              <span className="design-pattern-chip">Control pack: Player quick-open</span>
+              <span className="design-pattern-chip">Control pack: Required actions</span>
+            </div>
+          </section>
+
+          <div className="design-summary-dock">
+            <button
+              className={`design-summary-chip ${
+                activePanel === 'actions' ? 'design-summary-chip--active' : ''
+              }`}
+              type="button"
+              onClick={() => {
+                setActivePanel('actions');
+              }}
+            >
+              <span>Required actions</span>
+              <strong>{DESIGN_LAB_ACTIONS.length}</strong>
+            </button>
+            <button
+              className={`design-summary-chip ${
+                activePanel === 'players' ? 'design-summary-chip--active' : ''
+              }`}
+              type="button"
+              onClick={() => {
+                setActivePanel('players');
+              }}
+            >
+              <span>Linked players</span>
+              <strong>{DESIGN_LAB_PLAYERS.length}</strong>
+            </button>
+            <button
+              className={`design-summary-chip ${
+                activePanel === 'updates' ? 'design-summary-chip--active' : ''
+              }`}
+              type="button"
+              onClick={() => {
+                setActivePanel('updates');
+              }}
+            >
+              <span>Recent updates</span>
+              <strong>{DESIGN_LAB_UPDATES.length}</strong>
+            </button>
+            <div className="design-summary-chip design-summary-chip--static">
+              <span>Next event</span>
+              <strong>Tryout check-in</strong>
+            </div>
+          </div>
+
+          <section className="design-stack">
+            {activePanel === 'actions' ? (
+              <div className="design-panel-list">
+                {DESIGN_LAB_ACTIONS.map((action) => (
+                  <article key={action.id} className="design-panel-card">
+                    <div>
+                      <strong>{action.title}</strong>
+                      <p>{action.detail}</p>
+                    </div>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => {
+                        handleSelectPlayer(
+                          action.playerId,
+                          action.id === 'update-contact' ? 'profile-inline' : 'family-hub',
+                        );
+                      }}
+                    >
+                      {action.buttonLabel}
+                    </button>
+                  </article>
+                ))}
+              </div>
+            ) : null}
+
+            {activePanel === 'players' ? (
+              <div className="design-panel-list">
+                {DESIGN_LAB_PLAYERS.map((player) => (
+                  <button
+                    key={player.id}
+                    className={`design-player-quick-card ${
+                      selectedPlayer.id === player.id
+                        ? 'design-player-quick-card--active'
+                        : ''
+                    }`}
+                    type="button"
+                    onClick={() => {
+                      handleSelectPlayer(player.id);
+                    }}
+                  >
+                    <div>
+                      <strong>{player.displayName}</strong>
+                      <p>{player.summary}</p>
+                    </div>
+                    <span className="status-chip">{player.intakeStatus}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {activePanel === 'updates' ? (
+              <div className="design-panel-list">
+                {DESIGN_LAB_UPDATES.map((update) => (
+                  <button
+                    key={update.id}
+                    className="design-update-row"
+                    type="button"
+                    onClick={() => {
+                      handleSelectPlayer(update.playerId);
+                    }}
+                  >
+                    <div>
+                      <strong>{update.title}</strong>
+                      <p>{update.detail}</p>
+                    </div>
+                    <span>{update.timestampLabel}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </section>
+
+          <section className="design-player-spotlight">
+            <div className="design-player-spotlight__header">
+              <div>
+                <p className="design-spotlight__eyebrow">Selected record</p>
+                <h4>{selectedPlayer.displayName}</h4>
+                <p>{selectedPlayer.summary}</p>
+              </div>
+              <span className="status-chip">{selectedPlayer.relationshipLabel}</span>
+            </div>
+
+            <div className="design-kpi-row">
+              <div className="design-kpi-card">
+                <span>Current focus</span>
+                <strong>{selectedPlayer.currentFocus}</strong>
+              </div>
+              <div className="design-kpi-card">
+                <span>Tryout status</span>
+                <strong>{selectedPlayer.intakeStatus}</strong>
+              </div>
+              <div className="design-kpi-card">
+                <span>Quick jump</span>
+                <div className="design-kpi-card__actions">
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={() => {
+                      setActiveView('profile-inline');
+                    }}
+                  >
+                    Open profile pattern
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {activeView === 'profile-inline' ? (
+        <div className="design-canvas">
+          <section className="design-hero design-hero--soft">
+            <div>
+              <p className="design-hero__eyebrow">Pattern B / Read-first record</p>
+              <h4>Let saved data look like a polished profile first</h4>
+              <p>
+                Stable values stay in view mode until the user explicitly taps
+                them. Multi-entry collections keep stronger CRUD controls so the
+                user never loses track of history.
+              </p>
+            </div>
+            <div className="design-pattern-row">
+              <span className="design-pattern-chip">Control pack: Inline row edit</span>
+              <span className="design-pattern-chip">Control pack: Auto-save on blur</span>
+              <span className="design-pattern-chip">Control pack: Collection editor</span>
+            </div>
+          </section>
+
+          <section className="design-profile-stack">
+            <article className="design-surface-card">
+              <div className="design-surface-card__header">
+                <div>
+                  <p className="section-eyebrow">Editable identity</p>
+                  <h4>Avery player record</h4>
+                  <p className="section-copy">
+                    Click any saved value to edit it. Leaving the field saves
+                    the latest value automatically.
+                  </p>
+                </div>
+                <span className="status-chip">Inline autosave</span>
+              </div>
+
+              <div className="design-inline-grid">
+                {renderInlineField('firstName', 'First name')}
+                {renderInlineField('lastName', 'Last name')}
+                {renderInlineField('contactEmail', 'Contact email')}
+                {renderInlineField('phoneNumber', 'Phone number')}
+                {renderInlineField('birthYear', 'Birth year')}
+                {renderInlineField('primaryPosition', 'Primary position')}
+                {renderInlineField('handedness', 'Handedness')}
+                {renderInlineField('firstYearPlayingHockey', 'First year playing hockey')}
+              </div>
+
+              <div className="design-inline-status">
+                <strong>{autosaveMessage}</strong>
+                <span>Best for names, contact info, eligibility data, and other latest-value fields.</span>
+              </div>
+            </article>
+
+            <article className="design-surface-card">
+              <div className="design-surface-card__header">
+                <div>
+                  <p className="section-eyebrow">Collection editor</p>
+                  <h4>Keep history visible without making it noisy</h4>
+                  <p className="section-copy">
+                    Multi-entry data stays list-based with explicit add, edit,
+                    and delete controls. This is a stronger fit than inline
+                    autosave for records like prior teams or growth history.
+                  </p>
+                </div>
+                <div className="icon-action-row" aria-label="Collection controls">
+                  <IconActionButton label="Add season entry" icon="add" />
+                  <IconActionButton label="Save collection changes" icon="save" />
+                </div>
+              </div>
+
+              <div className="design-metric-grid">
+                <div className="design-metric-card">
+                  <span>Latest height</span>
+                  <strong>{profileDraft.height}</strong>
+                  <p>Stored with prior measurements for future graphing</p>
+                </div>
+                <div className="design-metric-card">
+                  <span>Latest weight</span>
+                  <strong>{profileDraft.weight}</strong>
+                  <p>Last recorded Apr 7, 2026</p>
+                </div>
+              </div>
+
+              <div className="design-team-history-list">
+                {DESIGN_LAB_TEAM_HISTORY.map((entry) => (
+                  <article key={entry.id} className="design-team-history-item">
+                    <div>
+                      <span className="design-season-pill">{entry.seasonLabel}</span>
+                      <strong>{entry.teamName}</strong>
+                      <p>
+                        {entry.positionPlayed} / {entry.note}
+                      </p>
+                    </div>
+                    <div className="icon-action-row" aria-label="Entry actions">
+                      <IconActionButton label="Edit season entry" icon="edit" />
+                      <IconActionButton
+                        label="Delete season entry"
+                        icon="delete"
+                        danger
+                      />
+                    </div>
+                  </article>
+                ))}
+              </div>
+
+              <details className="design-history-details">
+                <summary>Show stored physical history</summary>
+                <div className="stack-list">
+                  <div className="stack-card">
+                    <div>
+                      <strong>Apr 7, 2026</strong>
+                      <p>5'5" / 122 lbs</p>
+                    </div>
+                  </div>
+                  <div className="stack-card">
+                    <div>
+                      <strong>Nov 12, 2025</strong>
+                      <p>5'4" / 118 lbs</p>
+                    </div>
+                  </div>
+                </div>
+              </details>
+            </article>
+          </section>
+        </div>
+      ) : null}
+
+      {activeView === 'ops-command' ? (
+        <div className="design-canvas">
+          <section className="design-hero design-hero--ops">
+            <div>
+              <p className="design-hero__eyebrow">Pattern C / Staff command center</p>
+              <h4>Use density intentionally where the job is scanning and assignment</h4>
+              <p>
+                This shows the tryout planner as an operations screen: less card
+                nesting, more row-based scanning, and a density switch for staff
+                who need more roster information on screen.
+              </p>
+            </div>
+            <div className="design-pattern-row">
+              <span className="design-pattern-chip">Control pack: Density toggle</span>
+              <span className="design-pattern-chip">Control pack: Compact roster table</span>
+              <span className="design-pattern-chip">Control pack: Session cards</span>
+            </div>
+          </section>
+
+          <section className="design-toolbar">
+            <div className="design-toggle-group">
+              {(['comfortable', 'compact'] as DesignLabDensity[]).map((density) => (
+                <button
+                  key={density}
+                  className={`design-toggle-button ${
+                    opsDensity === density ? 'design-toggle-button--active' : ''
+                  }`}
+                  type="button"
+                  onClick={() => {
+                    setOpsDensity(density);
+                  }}
+                >
+                  {density === 'compact' ? 'Compact' : 'Comfortable'}
+                </button>
+              ))}
+            </div>
+
+            <div className="design-filter-row">
+              {opsGroupOptions.map((groupName) => (
+                <button
+                  key={groupName}
+                  className={`design-filter-button ${
+                    opsGroupFilter === groupName ? 'design-filter-button--active' : ''
+                  }`}
+                  type="button"
+                  onClick={() => {
+                    setOpsGroupFilter(groupName);
+                  }}
+                >
+                  {groupName === 'all' ? 'All groups' : groupName}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className={`design-ops-shell design-ops-shell--${opsDensity}`}>
+            <article className="design-surface-card">
+              <div className="design-surface-card__header">
+                <div>
+                  <p className="section-eyebrow">Roster board</p>
+                  <h4>Dense table for group, team, jersey, and session visibility</h4>
+                  <p className="section-copy">
+                    This replaces stacks of cards with one scan-friendly view
+                    for the operational fields coaches care about most.
+                  </p>
+                </div>
+                <span className="status-chip">{visibleRoster.length} players shown</span>
+              </div>
+
+              <div className="design-roster-table">
+                <div className="design-roster-table__head">
+                  <span>Player</span>
+                  <span>Group</span>
+                  <span>Team</span>
+                  <span>Jersey</span>
+                  <span>Session</span>
+                  <span>Notes</span>
+                </div>
+                {visibleRoster.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className={`design-roster-table__row design-roster-table__row--${entry.assignmentStatus.toLowerCase()}`}
+                  >
+                    <div className="design-roster-primary">
+                      <strong>{entry.displayName}</strong>
+                      <span>{entry.assignmentStatus}</span>
+                    </div>
+                    <span>{entry.groupName}</span>
+                    <span>{entry.teamName}</span>
+                    <span>{entry.jerseyNumber || 'Open'}</span>
+                    <span>{entry.sessionName}</span>
+                    <span>{entry.note}</span>
+                  </div>
+                ))}
+              </div>
+            </article>
+
+            <div className="design-session-grid">
+              {[
+                {
+                  id: 'session-a',
+                  name: 'Friday ID Skate',
+                  detail: 'Blue and Orange teams loaded with baseline skating and puck execution criteria.',
+                  badge: '2 teams',
+                },
+                {
+                  id: 'session-b',
+                  name: 'Saturday Pace Session',
+                  detail: 'Black team plus manual overrides for cross-age looks and battle detail.',
+                  badge: '1 team',
+                },
+              ].map((session) => (
+                <article key={session.id} className="design-session-card">
+                  <div className="design-session-card__header">
+                    <strong>{session.name}</strong>
+                    <span className="status-chip">{session.badge}</span>
+                  </div>
+                  <p>{session.detail}</p>
+                  <div className="action-row">
+                    <button className="ghost-button" type="button">
+                      Open roster
+                    </button>
+                    <button className="ghost-button" type="button">
+                      Bulk jerseys
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      <div className="footer-note">
+        <div className="stack-card stack-card--highlight">
+          <div>
+            <strong>How to use this lab</strong>
+            <p>
+              Tell me which pattern pieces feel premium, which feel too dense,
+              and which should become the default portal shell. I can then
+              rewire the live views in smaller, safer slices.
+            </p>
+          </div>
         </div>
       </div>
     </article>
@@ -4981,26 +6499,26 @@ function TryoutSetupCard({
                 </p>
               </div>
               <div className="action-row">
-                <button
-                  className="ghost-button"
-                  type="button"
+                <IconLabelActionButton
+                  label={
+                    busyAction === `delete-tryout-season-${draft.id}`
+                      ? 'Deleting season...'
+                      : 'Delete season'
+                  }
+                  icon="delete"
                   onClick={onDeleteSeason}
                   disabled={busyAction === `delete-tryout-season-${draft.id}`}
-                >
-                  {busyAction === `delete-tryout-season-${draft.id}`
-                    ? 'Deleting...'
-                    : 'Delete season'}
-                </button>
-                <button
-                  className="primary-button"
-                  type="button"
+                />
+                <IconLabelActionButton
+                  label={
+                    busyAction === `save-tryout-season-${draft.id}`
+                      ? 'Saving tryout...'
+                      : 'Save tryout'
+                  }
+                  icon="save"
                   onClick={onSaveSeason}
                   disabled={busyAction === `save-tryout-season-${draft.id}`}
-                >
-                  {busyAction === `save-tryout-season-${draft.id}`
-                    ? 'Saving...'
-                    : 'Save tryout setup'}
-                </button>
+                />
               </div>
             </div>
 
@@ -5025,13 +6543,7 @@ function TryoutSetupCard({
                   birth years and genders belong in each one.
                 </p>
               </div>
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={onAddGroup}
-              >
-                Add group
-              </button>
+              <IconLabelActionButton label="Add group" icon="add" onClick={onAddGroup} />
             </div>
 
             <div className="tryout-group-list">
@@ -5056,15 +6568,14 @@ function TryoutSetupCard({
                           players match this group by age/gender rules.
                         </p>
                       </div>
-                      <button
-                        className="ghost-button"
-                        type="button"
+                      <IconActionButton
+                        label="Remove group"
+                        icon="delete"
+                        danger
                         onClick={() => {
                           onRemoveGroup(group.id);
                         }}
-                      >
-                        Remove
-                      </button>
+                      />
                     </div>
 
                     <div className="field-grid">
@@ -5237,15 +6748,13 @@ function TryoutSetupCard({
                             {groupPlayers.length} players currently sit in this group.
                           </p>
                         </div>
-                        <button
-                          className="secondary-button"
-                          type="button"
+                        <IconLabelActionButton
+                          label="Add team"
+                          icon="add"
                           onClick={() => {
                             onAddTeam(group.id);
                           }}
-                        >
-                          Add team
-                        </button>
+                        />
                       </div>
 
                       <div className="tryout-team-board">
@@ -5305,15 +6814,14 @@ function TryoutSetupCard({
                                     }}
                                   />
                                 </div>
-                                <button
-                                  className="ghost-button"
-                                  type="button"
+                                <IconActionButton
+                                  label="Remove team"
+                                  icon="delete"
+                                  danger
                                   onClick={() => {
                                     onRemoveTeam(team.id);
                                   }}
-                                >
-                                  Remove
-                                </button>
+                                />
                               </div>
 
                               <div className="stack-list">
@@ -5350,13 +6858,11 @@ function TryoutSetupCard({
                   each session so evaluators can load the right player set later.
                 </p>
               </div>
-              <button
-                className="secondary-button"
-                type="button"
+              <IconLabelActionButton
+                label="Add session"
+                icon="add"
                 onClick={onAddSession}
-              >
-                Add session
-              </button>
+              />
             </div>
 
             <div className="tryout-session-list">
@@ -5382,15 +6888,14 @@ function TryoutSetupCard({
                           }}
                         />
                       </label>
-                      <button
-                        className="ghost-button"
-                        type="button"
+                      <IconActionButton
+                        label="Remove session"
+                        icon="delete"
+                        danger
                         onClick={() => {
                           onRemoveSession(session.id);
                         }}
-                      >
-                        Remove
-                      </button>
+                      />
                     </div>
 
                     <div className="chip-list">
@@ -5970,6 +7475,140 @@ function getLatestPhysicalEntry(
   return [...history].sort((left, right) =>
     left.recordedAt.localeCompare(right.recordedAt),
   )[history.length - 1] ?? null;
+}
+
+function buildFamilyActionItems(
+  players: PlayerRecord[],
+  receivedInvites: InviteRecord[],
+): FamilyActionItem[] {
+  const items: FamilyActionItem[] = [];
+
+  if (players.length === 0) {
+    items.push({
+      id: 'add-first-player',
+      title: 'Add your first player record',
+      detail: 'Create a player record to start the intake and linked-access workflow.',
+      targetSection: 'player',
+      playerId: 'new',
+    });
+  }
+
+  players.forEach((player) => {
+    if (player.intake.status !== 'submitted') {
+      items.push({
+        id: `intake-${player.id}`,
+        title: `Finish intake for ${getPlayerDisplayName(player.profile)}`,
+        detail:
+          player.intake.status === 'draft'
+            ? 'This tryout intake is saved as a draft and still needs submission.'
+            : 'This player still needs the intake questions completed and submitted.',
+        targetSection: 'intake',
+        playerId: player.id,
+      });
+    }
+
+    player.sentInvites
+      .filter((invite) => invite.status === 'pending')
+      .forEach((invite) => {
+        items.push({
+          id: `invite-${invite.id}`,
+          title: `Resolve linked access for ${getPlayerDisplayName(player.profile)}`,
+          detail: `${ROLE_LABELS[invite.invitedRole]} invite to ${invite.invitedEmail} is still pending.`,
+          targetSection: 'invites',
+          playerId: player.id,
+        });
+      });
+  });
+
+  receivedInvites
+    .filter((invite) => invite.status === 'pending')
+    .forEach((invite) => {
+      items.push({
+        id: `received-${invite.id}`,
+        title: `Respond to invite for ${invite.playerName}`,
+        detail: `${ROLE_LABELS[invite.invitedRole]} access is waiting for your response.`,
+        targetSection: 'invites',
+        playerId: invite.playerId,
+      });
+    });
+
+  return items;
+}
+
+function buildFamilyUpdateItems(
+  players: PlayerRecord[],
+  receivedInvites: InviteRecord[],
+): FamilyUpdateItem[] {
+  const items: FamilyUpdateItem[] = [];
+
+  players.forEach((player) => {
+    if (player.updatedAt) {
+      items.push({
+        id: `player-update-${player.id}`,
+        title: `${getPlayerDisplayName(player.profile)} profile updated`,
+        detail: buildPlayerListSummary(player),
+        timestamp: player.updatedAt,
+        targetSection: 'player',
+        playerId: player.id,
+      });
+    }
+
+    if (player.intake.updatedAt) {
+      items.push({
+        id: `intake-update-${player.id}`,
+        title: `${getPlayerDisplayName(player.profile)} intake ${formatIntakeStatus(
+          player.intake.status,
+        ).toLowerCase()}`,
+        detail:
+          player.intake.status === 'submitted'
+            ? 'The intake has been submitted and is ready for staff review.'
+            : 'The intake is still in progress.',
+        timestamp: player.intake.updatedAt,
+        targetSection: 'intake',
+        playerId: player.id,
+      });
+    }
+
+    player.sentInvites.forEach((invite) => {
+      items.push({
+        id: `sent-invite-${invite.id}`,
+        title: `${getPlayerDisplayName(player.profile)} linked access`,
+        detail: `${ROLE_LABELS[invite.invitedRole]} invite ${formatInviteStatus(invite.status).toLowerCase()}.`,
+        timestamp: invite.createdAt,
+        targetSection: 'invites',
+        playerId: player.id,
+      });
+    });
+  });
+
+  receivedInvites.forEach((invite) => {
+    items.push({
+      id: `received-invite-${invite.id}`,
+      title: `Invite received for ${invite.playerName}`,
+      detail: `${ROLE_LABELS[invite.invitedRole]} access from ${invite.invitedByLabel}.`,
+      timestamp: invite.createdAt,
+      targetSection: 'invites',
+      playerId: invite.playerId,
+    });
+  });
+
+  return items
+    .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
+    .slice(0, 4);
+}
+
+function buildNextEventLabel(organization: OrganizationOverview): string {
+  return organization.tryoutWindowLabel || 'Tryout schedule';
+}
+
+function sectionLabel(section: UserWorkspaceView): string {
+  if (section === 'player') return 'Player Profile';
+  if (section === 'intake') return 'Tryout Intake';
+  if (section === 'invites') return 'Linked Access';
+  if (section === 'profile') return 'My Profile';
+  if (section === 'tryouts') return 'Tryout Setup';
+  if (section === 'overview') return 'Overview';
+  return 'Portal';
 }
 
 function buildPlayerName(firstName: string, lastName: string): string {
