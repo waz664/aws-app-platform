@@ -247,6 +247,22 @@ export class GoldenBearsPlayerPortalStack extends Stack {
       authorizerId: jwtAuthorizer.ref,
     });
 
+    new apigwv2.CfnRoute(this, 'AdminUsersListRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'GET /admin/users',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
+    new apigwv2.CfnRoute(this, 'AdminUsersUpdateRoute', {
+      apiId: httpApi.apiId,
+      routeKey: 'PUT /admin/users/{userId}',
+      target: Fn.join('', ['integrations/', lambdaIntegration.ref]),
+      authorizationType: 'JWT',
+      authorizerId: jwtAuthorizer.ref,
+    });
+
     new apigwv2.CfnRoute(this, 'PlayersCreateRoute', {
       apiId: httpApi.apiId,
       routeKey: 'POST /players',
