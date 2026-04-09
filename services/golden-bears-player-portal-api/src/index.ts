@@ -40,6 +40,7 @@ const defaultOrganization = {
 type UserRole = 'parent' | 'player';
 type PrimaryRole = UserRole | 'staff';
 type AppRole = PrimaryRole | 'coach' | 'manager' | 'club-admin' | 'platform-admin';
+type AccountStatus = 'ACTIVE' | 'DISABLED';
 type IntakeStatus = 'not-started' | 'draft' | 'submitted';
 type InviteStatus = 'pending' | 'accepted' | 'declined' | 'revoked';
 
@@ -143,6 +144,9 @@ type UserProfileItem = {
   phoneNumber?: string;
   smsOptIn?: boolean;
   primaryRole: PrimaryRole | null;
+  accountStatus?: AccountStatus;
+  disabledAt?: string | null;
+  disabledByUserId?: string | null;
   createdAt: string | null;
   updatedAt: string | null;
 };
@@ -202,7 +206,7 @@ type AppAccessItem = {
     organizationId: string;
     roles: AppRole[];
   }[];
-  status: 'ACTIVE';
+  status: AccountStatus;
   grantedAt: string;
   grantedBy: string;
 };
@@ -265,6 +269,36 @@ type UserProfileUpdateInput = {
   contactEmail?: string;
   phoneNumber?: string;
   smsOptIn?: boolean;
+  accountStatus?: AccountStatus;
+  disabledAt?: string | null;
+  disabledByUserId?: string | null;
+};
+
+type AdminRoleUpdateInput = {
+  primaryRole: PrimaryRole;
+  organizationRoles: Array<'club-admin' | 'coach'>;
+  accountStatus: AccountStatus;
+};
+
+type AdminUserDirectoryEntry = {
+  userId: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  contactEmail: string;
+  phoneNumber: string;
+  smsOptIn: boolean;
+  primaryRole: PrimaryRole | null;
+  organizationRoles: Array<'club-admin' | 'coach'>;
+  assignedRoles: AppRole[];
+  accountStatus: AccountStatus;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+type AdminUsersResponse = {
+  users: AdminUserDirectoryEntry[];
+  nextCursor: string | null;
 };
 
 type BootstrapResponse = {
@@ -293,6 +327,7 @@ type BootstrapResponse = {
     phoneNumber: string;
     smsOptIn: boolean;
     primaryRole: PrimaryRole | null;
+    accountStatus: AccountStatus;
     createdAt: string | null;
     updatedAt: string | null;
   };
@@ -322,9 +357,24 @@ export async function handler(
 
   try {
     if (method === 'GET' && path === '/bootstrap') return json(200, await buildBootstrapResponse(userId, email));
+    await assertUserIsActive(userId);
     if (method === 'PUT' && path === '/profile') return json(200, await updateProfile(userId, email, event.body));
     if (method === 'PUT' && path === '/organization') return json(200, await updateOrganizationResponse(userId, email, event.body));
     if (method === 'POST' && path === '/access/claim-admin') return json(200, await claimAdminResponse(userId, email));
+    if (method === 'GET' && path === '/admin/users') {
+      return json(200, await listAdminUsersResponse(userId, event.queryStringParameters ?? {}));
+    }
+    if (method === 'PUT' && /^\/admin\/users\/[^/]+$/.test(path)) {
+      return json(
+        200,
+        await updateAdminUserResponse(
+          userId,
+          email,
+          decodeURIComponent(path.split('/')[3]),
+          event.body,
+        ),
+      );
+    }
     if (method === 'POST' && path === '/players') return json(200, await createPlayerResponse(userId, email, event.body));
     if (method === 'PATCH' && /^\/players\/[^/]+$/.test(path)) return json(200, await updatePlayerResponse(userId, email, decodeURIComponent(path.split('/')[2]), event.body));
     if (method === 'POST' && /^\/players\/[^/]+\/invites$/.test(path)) return json(200, await createInviteResponse(userId, email, decodeURIComponent(path.split('/')[2]), event.body));
@@ -339,13 +389,14 @@ export async function handler(
 }
 
 async function buildBootstrapResponse(userId: string, email: string): Promise<BootstrapResponse> {
-  const [resolvedAccess, userProfile, userLinks, receivedInvites, organization] = await Promise.all([
-    resolveAccess(userId),
-    getUserProfile(userId),
+  const [accessItem, userProfile, userLinks, receivedInvites, organization] = await Promise.all([
+    getAccessItem(userId),
+    ensureUserProfile(userId, email),
     listUserPlayerLinks(userId),
     listReceivedInvites(email),
     getOrganizationOverview(),
   ]);
+  const resolvedAccess = normalizeAccessItem(accessItem ?? undefined);
   const admin = await buildOrganizationAdminContext(email, resolvedAccess.currentRoles);
   const playerMap = await getPlayers(userLinks.map((link) => link.playerId));
   const players = await Promise.all(
@@ -387,15 +438,16 @@ async function buildBootstrapResponse(userId: string, email: string): Promise<Bo
     },
     user: {
       userId,
-      email,
-      firstName: userProfile?.firstName ?? '',
-      lastName: userProfile?.lastName ?? '',
-      contactEmail: userProfile?.contactEmail ?? '',
-      phoneNumber: userProfile?.phoneNumber ?? '',
-      smsOptIn: userProfile?.smsOptIn ?? false,
-      primaryRole: userProfile?.primaryRole ?? null,
-      createdAt: userProfile?.createdAt ?? null,
-      updatedAt: userProfile?.updatedAt ?? null,
+      email: userProfile.email || email,
+      firstName: userProfile.firstName ?? '',
+      lastName: userProfile.lastName ?? '',
+      contactEmail: userProfile.contactEmail ?? '',
+      phoneNumber: userProfile.phoneNumber ?? '',
+      smsOptIn: userProfile.smsOptIn ?? false,
+      primaryRole: userProfile.primaryRole ?? null,
+      accountStatus: userProfile.accountStatus ?? accessItem?.status ?? 'ACTIVE',
+      createdAt: userProfile.createdAt ?? null,
+      updatedAt: userProfile.updatedAt ?? null,
     },
     players: players.filter((player): player is SerializedPlayer => Boolean(player)),
     receivedInvites: receivedInvites.map(serializeInvite),
@@ -461,6 +513,119 @@ async function updateOrganizationResponse(userId: string, email: string, body: s
   const payload = parseJsonBody<OrganizationSettingsInput>(body);
   await saveOrganizationSettings(userId, payload);
   return buildBootstrapResponse(userId, email);
+}
+
+async function listAdminUsersResponse(
+  userId: string,
+  query: Record<string, string | undefined>,
+): Promise<AdminUsersResponse> {
+  await assertCanManageOrganization(userId);
+
+  const pageSize = clampPageSize(Number(query.pageSize ?? '12'));
+  const offset = decodeCursor(query.cursor);
+  const searchQuery = (query.query ?? '').trim().toLowerCase();
+  const primaryRole = normalizePrimaryRoleFilter(query.primaryRole);
+  const accountStatus = normalizeAccountStatusFilter(query.accountStatus);
+  const assignedRole = normalizeAssignedRoleFilter(query.assignedRole);
+  const profileItems = await scanAll<UserProfileItem>('UserProfile');
+  const accessMap = await getAccessMap(profileItems.map((profile) => profile.userId));
+  const users = profileItems
+    .map((profile) => serializeAdminUser(profile, accessMap.get(profile.userId)))
+    .filter((entry) =>
+      matchesAdminUserFilters(entry, {
+        searchQuery,
+        primaryRole,
+        accountStatus,
+        assignedRole,
+      }),
+    )
+    .sort(compareAdminUsers);
+  const safeOffset = Math.max(0, Math.min(offset, users.length));
+
+  return {
+    users: users.slice(safeOffset, safeOffset + pageSize),
+    nextCursor:
+      safeOffset + pageSize < users.length
+        ? encodeCursor(safeOffset + pageSize)
+        : null,
+  };
+}
+
+async function updateAdminUserResponse(
+  actorUserId: string,
+  actorEmail: string,
+  targetUserId: string,
+  body: string | undefined,
+): Promise<AdminUserDirectoryEntry> {
+  await assertCanManageOrganization(actorUserId);
+  const actorAccess = await resolveAccess(actorUserId);
+
+  const payload = parseJsonBody<AdminRoleUpdateInput>(body);
+  const nextPrimaryRole = payload.primaryRole;
+  if (nextPrimaryRole !== 'parent' && nextPrimaryRole !== 'player' && nextPrimaryRole !== 'staff') {
+    throw badRequest('Primary role must be parent, player, or staff.');
+  }
+
+  const nextOrganizationRoles = normalizeAdminOrganizationRoles(payload.organizationRoles);
+  const nextAccountStatus = normalizeAccountStatus(payload.accountStatus);
+  const [existingProfile, existingAccess] = await Promise.all([
+    getUserProfile(targetUserId),
+    getAccessItem(targetUserId),
+  ]);
+  if (!existingProfile) throw notFound('User profile not found.');
+  if (
+    extractStoredCurrentRoles(existingAccess ?? undefined).includes('platform-admin') &&
+    !actorAccess.currentRoles.includes('platform-admin')
+  ) {
+    throw forbidden('Only platform admins can manage platform-admin accounts.');
+  }
+  await reconcileUserLinksForPrimaryRole(targetUserId, nextPrimaryRole);
+  const existingAssignedRoles = getAssignedRolesForDirectory(
+    existingProfile,
+    existingAccess ?? undefined,
+  );
+  const nextAssignedRoles = getManagedAccessRoles(
+    existingAccess ?? undefined,
+    nextPrimaryRole,
+    nextOrganizationRoles,
+  );
+  await ensureOrganizationAdminCoverage(
+    targetUserId,
+    existingProfile.accountStatus ?? existingAccess?.status ?? 'ACTIVE',
+    existingAssignedRoles,
+    nextAssignedRoles,
+    nextAccountStatus,
+  );
+  const disabledAt =
+    nextAccountStatus === 'DISABLED'
+      ? existingProfile.disabledAt ?? new Date().toISOString()
+      : null;
+  const disabledByUserId =
+    nextAccountStatus === 'DISABLED'
+      ? existingProfile.disabledByUserId ?? actorUserId
+      : null;
+
+  await saveUserProfile(targetUserId, existingProfile.email, {
+    primaryRole: nextPrimaryRole,
+    accountStatus: nextAccountStatus,
+    disabledAt,
+    disabledByUserId,
+  });
+
+  await saveManagedAccessRoles(
+    targetUserId,
+    actorEmail,
+    nextPrimaryRole,
+    nextOrganizationRoles,
+    nextAccountStatus,
+  );
+
+  const [updatedProfile, updatedAccess] = await Promise.all([
+    getUserProfile(targetUserId),
+    getAccessItem(targetUserId),
+  ]);
+  if (!updatedProfile) throw notFound('Updated user profile not found.');
+  return serializeAdminUser(updatedProfile, updatedAccess);
 }
 
 async function createPlayerResponse(userId: string, email: string, body: string | undefined): Promise<{ bootstrap: BootstrapResponse; player: SerializedPlayer }> {
@@ -774,15 +939,46 @@ async function buildOrganizationAdminSummary(): Promise<OrganizationAdminSummary
 }
 
 async function resolveAccess(userId: string): Promise<ResolvedAccess> {
-  if (!APP_ACCESS_TABLE_NAME) {
-    return {
-      currentRoles: [],
-      organizationMemberships: [],
-    };
+  return normalizeAccessItem((await getAccessItem(userId)) ?? undefined);
+}
+
+async function getAccessItem(userId: string): Promise<AppAccessItem | null> {
+  if (!APP_ACCESS_TABLE_NAME) return null;
+  const response = await dynamo.send(
+    new GetCommand({ TableName: APP_ACCESS_TABLE_NAME, Key: { userId, appKey: APP_KEY } }),
+  );
+  return (response.Item as AppAccessItem | undefined) ?? null;
+}
+
+async function getAccessMap(
+  userIds: string[],
+): Promise<Map<string, AppAccessItem | undefined>> {
+  const accessMap = new Map<string, AppAccessItem | undefined>();
+  const distinctUserIds = [...new Set(userIds.filter(Boolean))];
+  if (!APP_ACCESS_TABLE_NAME || distinctUserIds.length === 0) return accessMap;
+
+  for (let index = 0; index < distinctUserIds.length; index += 100) {
+    const chunk = distinctUserIds.slice(index, index + 100);
+    const response = await dynamo.send(
+      new BatchGetCommand({
+        RequestItems: {
+          [APP_ACCESS_TABLE_NAME]: {
+            Keys: chunk.map((targetUserId) => ({ userId: targetUserId, appKey: APP_KEY })),
+          },
+        },
+      }),
+    );
+    const items = (response.Responses?.[APP_ACCESS_TABLE_NAME] as AppAccessItem[] | undefined) ?? [];
+    items.forEach((item) => {
+      accessMap.set(item.userId, item);
+    });
   }
-  const response = await dynamo.send(new GetCommand({ TableName: APP_ACCESS_TABLE_NAME, Key: { userId, appKey: APP_KEY } }));
-  const item = response.Item as AppAccessItem | undefined;
-  return normalizeAccessItem(item);
+
+  distinctUserIds.forEach((targetUserId) => {
+    if (!accessMap.has(targetUserId)) accessMap.set(targetUserId, undefined);
+  });
+
+  return accessMap;
 }
 
 async function ensureAppAccessRole(userId: string, role: UserRole): Promise<void> {
@@ -852,6 +1048,16 @@ async function getUserProfile(userId: string): Promise<UserProfileItem | null> {
   return (response.Item as UserProfileItem | undefined) ?? null;
 }
 
+async function ensureUserProfile(userId: string, email: string): Promise<UserProfileItem> {
+  const existingProfile = await getUserProfile(userId);
+  if (existingProfile) return existingProfile;
+
+  await saveUserProfile(userId, email, {});
+  const createdProfile = await getUserProfile(userId);
+  if (!createdProfile) throw new Error('User profile could not be created.');
+  return createdProfile;
+}
+
 async function requireUserProfile(userId: string): Promise<UserProfileItem> {
   const userProfile = await getUserProfile(userId);
   if (!userProfile) throw badRequest('Choose whether this account starts as parent, player, or staff before continuing.');
@@ -881,6 +1087,19 @@ async function saveUserProfile(
     existing?.phoneNumber ?? '',
   );
   const smsOptIn = primaryRole.smsOptIn ?? existing?.smsOptIn ?? false;
+  const accountStatus = primaryRole.accountStatus ?? existing?.accountStatus ?? 'ACTIVE';
+  const disabledAt =
+    primaryRole.disabledAt !== undefined
+      ? primaryRole.disabledAt
+      : accountStatus === 'DISABLED'
+        ? existing?.disabledAt ?? now
+        : null;
+  const disabledByUserId =
+    primaryRole.disabledByUserId !== undefined
+      ? primaryRole.disabledByUserId
+      : accountStatus === 'DISABLED'
+        ? existing?.disabledByUserId ?? null
+        : null;
 
   if (smsOptIn && !phoneNumber) {
     throw badRequest('Add a phone number before enabling text notifications.');
@@ -898,6 +1117,9 @@ async function saveUserProfile(
     phoneNumber,
     smsOptIn,
     primaryRole: nextPrimaryRole,
+    accountStatus,
+    disabledAt,
+    disabledByUserId,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
@@ -1077,7 +1299,7 @@ async function saveInvite(invite: InviteItem): Promise<void> {
   await dynamo.send(new PutCommand({ TableName: APP_DATA_TABLE_NAME, Item: invite }));
 }
 
-async function scanAll<T>(entityType: 'Player' | 'Invite'): Promise<T[]> {
+async function scanAll<T>(entityType: 'Player' | 'Invite' | 'UserProfile'): Promise<T[]> {
   const items: T[] = [];
   let exclusiveStartKey: Record<string, unknown> | undefined;
 
@@ -1099,29 +1321,9 @@ async function scanAll<T>(entityType: 'Player' | 'Invite'): Promise<T[]> {
 }
 
 function normalizeAccessItem(item: AppAccessItem | undefined): ResolvedAccess {
-  const fallbackRoles = item?.status === 'ACTIVE' && Array.isArray(item.roles)
-    ? item.roles.filter((role): role is AppRole => typeof role === 'string' && Boolean(role))
-    : [];
-
-  const organizationMemberships = Array.isArray(item?.organizationMemberships)
-    ? item.organizationMemberships
-        .filter(
-          (membership): membership is { organizationId: string; roles: AppRole[] } =>
-            Boolean(membership) &&
-            typeof membership.organizationId === 'string' &&
-            Array.isArray(membership.roles),
-        )
-        .map((membership) => ({
-          organizationId: membership.organizationId,
-          roles: membership.roles.filter(
-            (role): role is AppRole => typeof role === 'string' && Boolean(role),
-          ),
-        }))
-    : [];
-
-  const currentMembership = organizationMemberships.find(
-    (membership) => membership.organizationId === ORGANIZATION_ID,
-  );
+  const fallbackRoles = extractCurrentOrganizationRoles(item, true);
+  const organizationMemberships = extractOrganizationMemberships(item, true);
+  const currentMembership = organizationMemberships.find((membership) => membership.organizationId === ORGANIZATION_ID);
 
   return {
     currentRoles: currentMembership?.roles ?? fallbackRoles,
@@ -1150,6 +1352,339 @@ function upsertOrganizationMembership(
 
   return [...remainingMemberships, nextMembership];
 }
+
+function serializeAdminUser(
+  profile: UserProfileItem,
+  access: AppAccessItem | undefined | null,
+): AdminUserDirectoryEntry {
+  const storedOrganizationRoles = normalizeAdminOrganizationRoles(
+    extractStoredCurrentRoles(access ?? undefined).filter(
+      (role): role is 'club-admin' | 'coach' => role === 'club-admin' || role === 'coach',
+    ),
+  );
+  return {
+    userId: profile.userId,
+    email: profile.email,
+    firstName: profile.firstName ?? '',
+    lastName: profile.lastName ?? '',
+    contactEmail: profile.contactEmail ?? '',
+    phoneNumber: profile.phoneNumber ?? '',
+    smsOptIn: profile.smsOptIn ?? false,
+    primaryRole: profile.primaryRole ?? null,
+    organizationRoles: storedOrganizationRoles,
+    assignedRoles: getAssignedRolesForDirectory(profile, access ?? undefined),
+    accountStatus: profile.accountStatus ?? access?.status ?? 'ACTIVE',
+    createdAt: profile.createdAt ?? null,
+    updatedAt: profile.updatedAt ?? null,
+  };
+}
+
+function getAssignedRolesForDirectory(
+  profile: UserProfileItem,
+  access: AppAccessItem | undefined,
+): AppRole[] {
+  const primaryRoles = profile.primaryRole ? [profile.primaryRole] : [];
+  return [...new Set<AppRole>([...primaryRoles, ...extractStoredCurrentRoles(access)])];
+}
+
+function matchesAdminUserFilters(
+  entry: AdminUserDirectoryEntry,
+  filters: {
+    searchQuery: string;
+    primaryRole: PrimaryRole | null;
+    accountStatus: AccountStatus | null;
+    assignedRole: AppRole | null;
+  },
+): boolean {
+  if (filters.primaryRole && entry.primaryRole !== filters.primaryRole) return false;
+  if (filters.accountStatus && entry.accountStatus !== filters.accountStatus) return false;
+  if (filters.assignedRole && !entry.assignedRoles.includes(filters.assignedRole)) return false;
+
+  if (!filters.searchQuery) return true;
+
+  const haystack = [
+    entry.firstName,
+    entry.lastName,
+    buildPlayerName(entry.firstName, entry.lastName),
+    entry.email,
+    entry.contactEmail,
+    entry.phoneNumber,
+    ...entry.assignedRoles.map((role) => ROLE_LABELS_FOR_SEARCH[role]),
+  ]
+    .join(' ')
+    .toLowerCase();
+
+  return haystack.includes(filters.searchQuery);
+}
+
+function compareAdminUsers(left: AdminUserDirectoryEntry, right: AdminUserDirectoryEntry): number {
+  if (left.accountStatus !== right.accountStatus) {
+    return left.accountStatus === 'ACTIVE' ? -1 : 1;
+  }
+
+  const leftName = `${left.lastName} ${left.firstName}`.trim().toLowerCase() || left.email.toLowerCase();
+  const rightName = `${right.lastName} ${right.firstName}`.trim().toLowerCase() || right.email.toLowerCase();
+  return leftName.localeCompare(rightName);
+}
+
+function normalizePrimaryRoleFilter(value: string | undefined): PrimaryRole | null {
+  if (value === 'parent' || value === 'player' || value === 'staff') return value;
+  return null;
+}
+
+function normalizeAssignedRoleFilter(value: string | undefined): AppRole | null {
+  if (
+    value === 'parent' ||
+    value === 'player' ||
+    value === 'staff' ||
+    value === 'coach' ||
+    value === 'club-admin' ||
+    value === 'manager' ||
+    value === 'platform-admin'
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function normalizeAccountStatusFilter(value: string | undefined): AccountStatus | null {
+  if (value === 'ACTIVE' || value === 'DISABLED') return value;
+  return null;
+}
+
+function normalizeAdminOrganizationRoles(
+  roles: unknown,
+): Array<'club-admin' | 'coach'> {
+  if (!Array.isArray(roles)) return [];
+
+  const nextRoles = roles.filter(
+    (role): role is 'club-admin' | 'coach' => role === 'club-admin' || role === 'coach',
+  );
+  return [...new Set(nextRoles)];
+}
+
+function normalizeAccountStatus(value: unknown): AccountStatus {
+  if (value === 'ACTIVE' || value === 'DISABLED') return value;
+  throw badRequest('Account status must be ACTIVE or DISABLED.');
+}
+
+function clampPageSize(value: number): number {
+  if (!Number.isFinite(value)) return 12;
+  return Math.min(50, Math.max(5, Math.trunc(value)));
+}
+
+function encodeCursor(offset: number): string {
+  return Buffer.from(JSON.stringify({ offset }), 'utf8').toString('base64url');
+}
+
+function decodeCursor(cursor: string | undefined): number {
+  if (!cursor) return 0;
+
+  try {
+    const payload = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as {
+      offset?: unknown;
+    };
+    if (typeof payload.offset !== 'number' || !Number.isFinite(payload.offset) || payload.offset < 0) {
+      throw new Error('Invalid cursor');
+    }
+    return Math.trunc(payload.offset);
+  } catch {
+    throw badRequest('Cursor is invalid.');
+  }
+}
+
+async function assertUserIsActive(userId: string): Promise<void> {
+  const [profile, access] = await Promise.all([getUserProfile(userId), getAccessItem(userId)]);
+  const accountStatus = profile?.accountStatus ?? access?.status ?? 'ACTIVE';
+  if (accountStatus === 'DISABLED') {
+    throw forbidden('This account has been disabled. Contact a club administrator.');
+  }
+}
+
+async function assertCanManageOrganization(userId: string): Promise<void> {
+  const resolvedAccess = await resolveAccess(userId);
+  if (!resolvedAccess.currentRoles.includes('club-admin') && !resolvedAccess.currentRoles.includes('platform-admin')) {
+    throw forbidden('Only organization admins can manage portal users.');
+  }
+}
+
+function getManagedAccessRoles(
+  existingAccess: AppAccessItem | undefined,
+  nextPrimaryRole: PrimaryRole,
+  nextOrganizationRoles: Array<'club-admin' | 'coach'>,
+): AppRole[] {
+  const preservedRoles = extractStoredCurrentRoles(existingAccess).filter(
+    (role) => role === 'manager' || role === 'platform-admin',
+  );
+  const familyRoles =
+    nextPrimaryRole === 'parent' || nextPrimaryRole === 'player'
+      ? [nextPrimaryRole]
+      : [];
+  return [...new Set<AppRole>([...preservedRoles, ...familyRoles, ...nextOrganizationRoles])];
+}
+
+async function saveManagedAccessRoles(
+  userId: string,
+  grantedBy: string,
+  nextPrimaryRole: PrimaryRole,
+  nextOrganizationRoles: Array<'club-admin' | 'coach'>,
+  nextAccountStatus: AccountStatus,
+): Promise<void> {
+  if (!APP_ACCESS_TABLE_NAME) return;
+
+  const existingAccess = await getAccessItem(userId);
+  const roles = getManagedAccessRoles(existingAccess ?? undefined, nextPrimaryRole, nextOrganizationRoles);
+  const now = new Date().toISOString();
+
+  await dynamo.send(
+    new PutCommand({
+      TableName: APP_ACCESS_TABLE_NAME,
+      Item: {
+        userId,
+        appKey: APP_KEY,
+        roles,
+        organizationMemberships: upsertOrganizationMembership(
+          extractOrganizationMemberships(existingAccess ?? undefined, false),
+          ORGANIZATION_ID,
+          roles,
+        ),
+        status: nextAccountStatus,
+        grantedAt: existingAccess?.grantedAt ?? now,
+        grantedBy: existingAccess?.grantedBy ?? grantedBy,
+      } satisfies AppAccessItem,
+    }),
+  );
+}
+
+async function reconcileUserLinksForPrimaryRole(
+  userId: string,
+  nextPrimaryRole: PrimaryRole,
+): Promise<void> {
+  if (nextPrimaryRole !== 'parent' && nextPrimaryRole !== 'player') return;
+
+  const links = await listUserPlayerLinks(userId);
+  if (links.length === 0) return;
+
+  if (nextPrimaryRole === 'player') {
+    if (links.length > 1) {
+      throw conflict('A player account can only be linked to one player record.');
+    }
+
+    const currentPlayerLinks = await listPlayerLinks(links[0].playerId);
+    if (currentPlayerLinks.some((link) => link.userId !== userId && link.relationship === 'player')) {
+      throw conflict('That player record is already linked to a player account.');
+    }
+  }
+
+  const updatedLinks = links
+    .filter((link) => link.relationship !== nextPrimaryRole)
+    .map((link) => ({
+      ...link,
+      relationship: nextPrimaryRole,
+    }));
+
+  if (updatedLinks.length === 0) return;
+
+  await Promise.all(
+    updatedLinks.map((link) =>
+      dynamo.send(new PutCommand({ TableName: APP_DATA_TABLE_NAME, Item: link })),
+    ),
+  );
+}
+
+async function ensureOrganizationAdminCoverage(
+  targetUserId: string,
+  existingAccountStatus: AccountStatus,
+  existingAssignedRoles: AppRole[],
+  nextAssignedRoles: AppRole[],
+  nextAccountStatus: AccountStatus,
+): Promise<void> {
+  const currentlyActiveAdmin =
+    existingAccountStatus === 'ACTIVE' && hasAdminRole(existingAssignedRoles);
+  const remainsActiveAdmin = nextAccountStatus === 'ACTIVE' && hasAdminRole(nextAssignedRoles);
+
+  if (!currentlyActiveAdmin || remainsActiveAdmin) return;
+  if (await hasAnotherActiveOrganizationAdmin(targetUserId)) return;
+
+  throw conflict('At least one active organization admin must remain assigned.');
+}
+
+async function hasAnotherActiveOrganizationAdmin(excludedUserId: string): Promise<boolean> {
+  if (!APP_ACCESS_TABLE_NAME) return false;
+
+  const response = await dynamo.send(
+    new QueryCommand({
+      TableName: APP_ACCESS_TABLE_NAME,
+      IndexName: 'by-app',
+      KeyConditionExpression: 'appKey = :appKey',
+      ExpressionAttributeValues: {
+        ':appKey': APP_KEY,
+      },
+    }),
+  );
+
+  const items = (response.Items as AppAccessItem[] | undefined) ?? [];
+  return items.some((item) => {
+    if (item.userId === excludedUserId) return false;
+    return hasAdminRole(normalizeAccessItem(item).currentRoles);
+  });
+}
+
+function hasAdminRole(roles: AppRole[]): boolean {
+  return roles.includes('club-admin') || roles.includes('platform-admin');
+}
+
+function extractOrganizationMemberships(
+  item: AppAccessItem | undefined,
+  respectStatus: boolean,
+): ResolvedAccess['organizationMemberships'] {
+  if (!item) return [];
+  if (respectStatus && item.status !== 'ACTIVE') return [];
+  if (!Array.isArray(item.organizationMemberships)) return [];
+
+  return item.organizationMemberships
+    .filter(
+      (membership): membership is { organizationId: string; roles: AppRole[] } =>
+        Boolean(membership) &&
+        typeof membership.organizationId === 'string' &&
+        Array.isArray(membership.roles),
+    )
+    .map((membership) => ({
+      organizationId: membership.organizationId,
+      roles: membership.roles.filter(
+        (role): role is AppRole => typeof role === 'string' && Boolean(role),
+      ),
+    }));
+}
+
+function extractCurrentOrganizationRoles(
+  item: AppAccessItem | undefined,
+  respectStatus: boolean,
+): AppRole[] {
+  if (!item) return [];
+  if (respectStatus && item.status !== 'ACTIVE') return [];
+
+  const fallbackRoles = Array.isArray(item.roles)
+    ? item.roles.filter((role): role is AppRole => typeof role === 'string' && Boolean(role))
+    : [];
+  const memberships = extractOrganizationMemberships(item, respectStatus);
+  const currentMembership = memberships.find((membership) => membership.organizationId === ORGANIZATION_ID);
+  return [...new Set<AppRole>(currentMembership?.roles ?? fallbackRoles)];
+}
+
+function extractStoredCurrentRoles(item: AppAccessItem | undefined): AppRole[] {
+  return extractCurrentOrganizationRoles(item, false);
+}
+
+const ROLE_LABELS_FOR_SEARCH: Record<AppRole, string> = {
+  parent: 'parent',
+  player: 'player',
+  staff: 'staff',
+  coach: 'coach',
+  manager: 'manager',
+  'club-admin': 'organization admin',
+  'platform-admin': 'platform admin',
+};
 
 function serializeOrganization(organization: OrganizationItem): OrganizationOverview {
   return {

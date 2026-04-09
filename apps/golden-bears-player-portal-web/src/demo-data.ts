@@ -42,6 +42,7 @@ export const demoData: BootstrapData = {
     phoneNumber: '',
     smsOptIn: false,
     primaryRole: 'parent',
+    accountStatus: 'ACTIVE',
     createdAt: '2026-04-08T16:00:00.000Z',
     updatedAt: '2026-04-08T16:00:00.000Z',
   },

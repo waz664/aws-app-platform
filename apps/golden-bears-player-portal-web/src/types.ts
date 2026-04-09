@@ -2,6 +2,8 @@ export type RuntimeMode = 'demo' | 'aws';
 
 export type UserRole = 'parent' | 'player';
 export type PrimaryRole = UserRole | 'staff';
+export type AccountStatus = 'ACTIVE' | 'DISABLED';
+export type AdminOrganizationRole = 'club-admin' | 'coach';
 
 export type AppRole =
   | PrimaryRole
@@ -64,8 +66,36 @@ export type UserProfile = {
   phoneNumber: string;
   smsOptIn: boolean;
   primaryRole: PrimaryRole | null;
+  accountStatus: AccountStatus;
   createdAt: string | null;
   updatedAt: string | null;
+};
+
+export type AdminUserDirectoryEntry = {
+  userId: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  contactEmail: string;
+  phoneNumber: string;
+  smsOptIn: boolean;
+  primaryRole: PrimaryRole | null;
+  organizationRoles: AdminOrganizationRole[];
+  assignedRoles: AppRole[];
+  accountStatus: AccountStatus;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type AdminUsersResponse = {
+  users: AdminUserDirectoryEntry[];
+  nextCursor: string | null;
+};
+
+export type AdminUserUpdateInput = {
+  primaryRole: PrimaryRole;
+  organizationRoles: AdminOrganizationRole[];
+  accountStatus: AccountStatus;
 };
 
 export type PlayerTeamHistoryEntry = {

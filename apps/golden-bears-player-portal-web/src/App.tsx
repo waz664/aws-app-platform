@@ -7,9 +7,11 @@ import {
   createInvite,
   createPlayer,
   declineInvite,
+  loadAdminUsers,
   loadBootstrapData,
   revokeInvite,
   saveUserRole,
+  updateAdminUser,
   updateCurrentUserProfile,
   updatePlayer,
   updateOrganizationSettings,
@@ -17,6 +19,9 @@ import {
 import { beginSignIn, beginSignOut, restoreAuthSession } from './lib/auth';
 import { loadRuntimeConfig } from './lib/runtime-config';
 import type {
+  AccountStatus,
+  AdminOrganizationRole,
+  AdminUserDirectoryEntry,
   AppRole,
   AuthSession,
   BootstrapData,
@@ -55,6 +60,29 @@ type EditablePlayerState = {
   intake: IntakeAnswers;
   intakeStatus: IntakeStatus;
 };
+
+type AdminWorkspaceView = 'overview' | 'organization' | 'users';
+
+type AdminUserFiltersState = {
+  query: string;
+  primaryRole: PrimaryRole | 'all';
+  assignedRole: AppRole | 'all';
+  accountStatus: AccountStatus | 'all';
+};
+
+type EditableAdminUserState = {
+  primaryRole: PrimaryRole;
+  organizationRoles: AdminOrganizationRole[];
+  accountStatus: AccountStatus;
+};
+
+type UserWorkspaceView =
+  | 'setup'
+  | 'overview'
+  | 'profile'
+  | 'player'
+  | 'intake'
+  | 'invites';
 
 type UserProfileFieldKey = Exclude<keyof EditableUserProfileState, 'smsOptIn'>;
 
@@ -230,6 +258,15 @@ const formatter = new Intl.DateTimeFormat('en-US', {
   timeStyle: 'short',
 });
 
+const ADMIN_USERS_PAGE_SIZE = 12;
+
+const defaultAdminUserFilters: AdminUserFiltersState = {
+  query: '',
+  primaryRole: 'all',
+  assignedRole: 'all',
+  accountStatus: 'all',
+};
+
 function App() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -248,6 +285,22 @@ function App() {
   const [organizationDraft, setOrganizationDraft] = useState<OrganizationSettingsInput | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [activeAdminSection, setActiveAdminSection] = useState<AdminWorkspaceView>('overview');
+  const [activeUserSection, setActiveUserSection] = useState<UserWorkspaceView>('overview');
+  const [adminUserFilters, setAdminUserFilters] = useState<AdminUserFiltersState>(
+    defaultAdminUserFilters,
+  );
+  const [appliedAdminUserFilters, setAppliedAdminUserFilters] = useState<AdminUserFiltersState>(
+    defaultAdminUserFilters,
+  );
+  const [adminUsers, setAdminUsers] = useState<AdminUserDirectoryEntry[]>([]);
+  const [adminUsersCursor, setAdminUsersCursor] = useState<string | null>(null);
+  const [adminUsersNextCursor, setAdminUsersNextCursor] = useState<string | null>(null);
+  const [adminUsersHistory, setAdminUsersHistory] = useState<Array<string | null>>([]);
+  const [adminUsersLoaded, setAdminUsersLoaded] = useState(false);
+  const [adminUsersLoading, setAdminUsersLoading] = useState(false);
+  const [selectedAdminUserId, setSelectedAdminUserId] = useState<string | null>(null);
+  const [adminUserDraft, setAdminUserDraft] = useState<EditableAdminUserState | null>(null);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -356,6 +409,19 @@ function App() {
   }, [bootstrap]);
 
   useEffect(() => {
+    if (activeRole === 'club-admin' || activeRole === 'platform-admin') return;
+
+    setActiveAdminSection('overview');
+    setAdminUsers([]);
+    setAdminUsersCursor(null);
+    setAdminUsersNextCursor(null);
+    setAdminUsersHistory([]);
+    setAdminUsersLoaded(false);
+    setSelectedAdminUserId(null);
+    setAdminUserDraft(null);
+  }, [activeRole]);
+
+  useEffect(() => {
     if (!bootstrap) return;
     const familyRole = resolveFamilyRole(activeRole, bootstrap.user.primaryRole);
 
@@ -402,6 +468,85 @@ function App() {
     );
     setInviteEmail('');
   }, [activeRole, bootstrap, selectedPlayerId]);
+
+  useEffect(() => {
+    if (!bootstrap) return;
+
+    const nextSections = getUserWorkspaceSections(activeRole, bootstrap.user.primaryRole);
+    if (nextSections.length === 0) return;
+    if (nextSections.some((section) => section.id === activeUserSection)) return;
+
+    setActiveUserSection(nextSections[0].id);
+  }, [activeRole, activeUserSection, bootstrap]);
+
+  useEffect(() => {
+    if (
+      activeRole !== 'club-admin' &&
+      activeRole !== 'platform-admin'
+    ) {
+      return;
+    }
+    if (activeAdminSection !== 'users') return;
+    if (!runtimeConfig || authSession?.status !== 'authenticated') return;
+    const currentRuntimeConfig = runtimeConfig;
+    const currentIdToken = authSession.idToken;
+
+    let cancelled = false;
+
+    async function loadDirectory() {
+      setAdminUsersLoading(true);
+
+      try {
+        const response = await loadAdminUsers(currentRuntimeConfig, currentIdToken, {
+          ...appliedAdminUserFilters,
+          cursor: adminUsersCursor,
+          pageSize: ADMIN_USERS_PAGE_SIZE,
+        });
+        if (cancelled) return;
+
+        setAdminUsers(response.users);
+        setAdminUsersNextCursor(response.nextCursor);
+        setAdminUsersLoaded(true);
+        setSelectedAdminUserId((currentValue) =>
+          response.users.some((user) => user.userId === currentValue)
+            ? currentValue
+            : response.users[0]?.userId ?? null,
+        );
+      } catch (error) {
+        if (cancelled) return;
+        setFeedback({
+          tone: 'error',
+          message: getErrorMessage(error),
+        });
+      } finally {
+        if (!cancelled) setAdminUsersLoading(false);
+      }
+    }
+
+    void loadDirectory();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeAdminSection,
+    activeRole,
+    adminUsersCursor,
+    appliedAdminUserFilters,
+    authSession,
+    runtimeConfig,
+  ]);
+
+  useEffect(() => {
+    const selectedUser =
+      selectedAdminUserId
+        ? adminUsers.find((user) => user.userId === selectedAdminUserId) ?? null
+        : null;
+
+    setAdminUserDraft(
+      selectedUser ? buildEditableAdminUserState(selectedUser) : null,
+    );
+  }, [adminUsers, selectedAdminUserId]);
 
   async function runAction(
     actionKey: string,
@@ -661,6 +806,75 @@ function App() {
     });
   }
 
+  function applyAdminUserFilters(nextFilters: AdminUserFiltersState): void {
+    setAppliedAdminUserFilters(nextFilters);
+    setAdminUsersCursor(null);
+    setAdminUsersNextCursor(null);
+    setAdminUsersHistory([]);
+    setAdminUsersLoaded(false);
+    setSelectedAdminUserId(null);
+  }
+
+  async function handleSaveAdminUser(): Promise<void> {
+    if (
+      !runtimeConfig ||
+      authSession?.status !== 'authenticated' ||
+      !adminUserDraft ||
+      !selectedAdminUserId ||
+      !bootstrap
+    ) {
+      return;
+    }
+
+    await runAction(`save-admin-user-${selectedAdminUserId}`, async () => {
+      const updatedUser = await updateAdminUser(
+        runtimeConfig,
+        authSession.idToken,
+        selectedAdminUserId,
+        adminUserDraft,
+      );
+
+      const isSelfUpdate = selectedAdminUserId === bootstrap.user.userId;
+      let nextBootstrap = bootstrap;
+
+      if (isSelfUpdate) {
+        nextBootstrap = await loadBootstrapData(runtimeConfig, authSession.idToken);
+        setBootstrap(nextBootstrap);
+      }
+
+      if (
+        !isSelfUpdate ||
+        (
+          nextBootstrap.user.accountStatus === 'ACTIVE' &&
+          nextBootstrap.access.canManageOrganization
+        )
+      ) {
+        const refreshedUsers = await loadAdminUsers(runtimeConfig, authSession.idToken, {
+          ...appliedAdminUserFilters,
+          cursor: adminUsersCursor,
+          pageSize: ADMIN_USERS_PAGE_SIZE,
+        });
+        setAdminUsers(refreshedUsers.users);
+        setAdminUsersNextCursor(refreshedUsers.nextCursor);
+        setSelectedAdminUserId((currentValue) =>
+          refreshedUsers.users.some((user) => user.userId === currentValue)
+            ? currentValue
+            : refreshedUsers.users.find((user) => user.userId === updatedUser.userId)?.userId ??
+              refreshedUsers.users[0]?.userId ??
+              null,
+        );
+      }
+
+      setFeedback({
+        tone: 'success',
+        message:
+          updatedUser.accountStatus === 'DISABLED'
+            ? 'User access has been disabled.'
+            : 'User access and role settings have been updated.',
+      });
+    });
+  }
+
   async function handleSavePlayer(nextStatus: IntakeStatus): Promise<void> {
     if (!runtimeConfig || !authSession || !draftPlayer) return;
 
@@ -872,6 +1086,17 @@ function App() {
   const activeWorkspaceTitle = activeRole ? ROLE_LABELS[activeRole] : 'Select role';
   const activeWorkspaceCopy = describeWorkspace(activeRole, bootstrap.user.primaryRole);
   const accountDisplayName = getUserDisplayName(bootstrap.user);
+  const isAdminWorkspace =
+    activeRole === 'club-admin' || activeRole === 'platform-admin';
+  const isAccountDisabled = bootstrap.user.accountStatus === 'DISABLED';
+  const userWorkspaceSections = getUserWorkspaceSections(
+    activeRole,
+    bootstrap.user.primaryRole,
+  );
+  const selectedAdminUser =
+    selectedAdminUserId
+      ? adminUsers.find((user) => user.userId === selectedAdminUserId) ?? null
+      : null;
   const userProfileCard = userDraft ? (
     <UserProfileCard
       signInEmail={bootstrap.user.email}
@@ -893,6 +1118,55 @@ function App() {
       }}
     />
   ) : null;
+  const workspaceAccessCard = (
+    <article className="card">
+      <div className="sidebar-header">
+        <div>
+          <p className="section-eyebrow">Current Access</p>
+          <h3>Available workspaces</h3>
+        </div>
+      </div>
+      <div className="stack-list">
+        {bootstrap.access.organizations.map((organizationAccess) => (
+          <div
+            key={organizationAccess.organizationId}
+            className={`stack-card ${
+              organizationAccess.organizationId === bootstrap.access.activeOrganizationId
+                ? 'stack-card--highlight'
+                : ''
+            }`}
+          >
+            <div>
+              <strong>{organizationAccess.name}</strong>
+              <p>
+                {organizationAccess.roles.length > 0
+                  ? organizationAccess.roles.map((role) => ROLE_LABELS[role]).join(', ')
+                  : 'No assigned roles yet'}
+              </p>
+            </div>
+          </div>
+        ))}
+
+        {availableRoles.map((role) => (
+          <button
+            key={role}
+            className={`role-card ${role === activeRole ? 'option-card--selected' : ''}`}
+            type="button"
+            onClick={() => {
+              setActiveRole(role);
+            }}
+          >
+            <strong>{ROLE_LABELS[role]}</strong>
+            <span>
+              {role === activeRole
+                ? 'Currently active in this session.'
+                : 'Switch to this workspace.'}
+            </span>
+          </button>
+        ))}
+      </div>
+    </article>
+  );
 
   return (
     <div className="app-shell">
@@ -964,29 +1238,31 @@ function App() {
                   <p className="helper-copy">{activeWorkspaceCopy}</p>
                 </div>
 
-                <div className="account-popover__section">
-                  <p className="section-eyebrow">Switch workspace</p>
-                  <div className="menu-role-list">
-                    {availableRoles.map((role) => (
-                      <button
-                        key={role}
-                        className={`menu-role-button ${
-                          role === activeRole ? 'menu-role-button--active' : ''
-                        }`}
-                        type="button"
-                        onClick={() => {
-                          setActiveRole(role);
-                          setAccountMenuOpen(false);
-                        }}
-                      >
-                        <span>{ROLE_LABELS[role]}</span>
-                        {role === activeRole ? <strong>Current</strong> : null}
-                      </button>
-                    ))}
+                {!isAccountDisabled ? (
+                  <div className="account-popover__section">
+                    <p className="section-eyebrow">Switch workspace</p>
+                    <div className="menu-role-list">
+                      {availableRoles.map((role) => (
+                        <button
+                          key={role}
+                          className={`menu-role-button ${
+                            role === activeRole ? 'menu-role-button--active' : ''
+                          }`}
+                          type="button"
+                          onClick={() => {
+                            setActiveRole(role);
+                            setAccountMenuOpen(false);
+                          }}
+                        >
+                          <span>{ROLE_LABELS[role]}</span>
+                          {role === activeRole ? <strong>Current</strong> : null}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                ) : null}
 
-                {bootstrap.admin.canClaimOrganizationAdmin ? (
+                {bootstrap.admin.canClaimOrganizationAdmin && !isAccountDisabled ? (
                   <div className="account-popover__section">
                     <button
                       className="secondary-button account-action-button"
@@ -1027,7 +1303,7 @@ function App() {
         </div>
       ) : null}
 
-      {bootstrap.admin.canClaimOrganizationAdmin ? (
+      {bootstrap.admin.canClaimOrganizationAdmin && !isAccountDisabled ? (
         <section className="card card--highlight">
           <div className="card-header">
             <div>
@@ -1056,7 +1332,7 @@ function App() {
         </section>
       ) : null}
 
-      {activeRole === 'club-admin' || activeRole === 'platform-admin' ? (
+      {!isAccountDisabled && isAdminWorkspace ? (
         <section className="summary-strip">
           <article className="summary-card">
             <span>Total players</span>
@@ -1075,7 +1351,7 @@ function App() {
             <strong>{bootstrap.admin.summary?.pendingInvites ?? 0}</strong>
           </article>
         </section>
-      ) : familyRole ? (
+      ) : !isAccountDisabled && familyRole ? (
         <section className="summary-strip">
           <article className="summary-card">
             <span>Linked players</span>
@@ -1097,7 +1373,75 @@ function App() {
       ) : null}
 
       <main className="app-content">
-        {activeRole === 'club-admin' || activeRole === 'platform-admin' ? (
+        {isAccountDisabled ? (
+          <section className="workspace-grid">
+            <div className="workspace-main">
+              <article className="card">
+                <div className="card-header">
+                  <div>
+                    <p className="section-eyebrow">Account Status</p>
+                    <h2>This portal account is currently disabled</h2>
+                    <p className="section-copy">
+                      Sign-in is still working, but this account cannot use the
+                      portal until a club administrator re-enables access.
+                      Contact the NC Golden Bears staff if you believe this was
+                      done in error.
+                    </p>
+                  </div>
+                  <span className="status-chip status-chip--warning">Disabled</span>
+                </div>
+
+                <div className="stack-list">
+                  <div className="stack-card stack-card--warning">
+                    <div>
+                      <strong>What this means</strong>
+                      <p>
+                        Player, parent, and staff workflows are paused for this
+                        login until an organization admin restores access.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="stack-card">
+                    <div>
+                      <strong>Who can help</strong>
+                      <p>
+                        A current NC Golden Bears organization admin can
+                        re-enable the account from the admin user directory.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            </div>
+
+            <div className="workspace-sidebar">
+              <article className="card">
+                <div className="card-header">
+                  <div>
+                    <p className="section-eyebrow">Need Anything Else?</p>
+                    <h3>Sign out of this session</h3>
+                  </div>
+                </div>
+                <p className="section-copy">
+                  You can safely log out and return after a club administrator
+                  has restored access.
+                </p>
+                <div className="footer-note">
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={() => {
+                      void handleSignOut();
+                    }}
+                    disabled={busyAction === 'sign-out'}
+                  >
+                    {busyAction === 'sign-out' ? 'Signing out...' : 'Log out'}
+                  </button>
+                </div>
+              </article>
+            </div>
+          </section>
+        ) : isAdminWorkspace ? (
           <section className="workspace-grid">
             <div className="workspace-main">
               <article className="card">
@@ -1106,10 +1450,8 @@ function App() {
                     <p className="section-eyebrow">Admin Workspace</p>
                     <h2>Organization operations</h2>
                     <p className="section-copy">
-                      This staff-side slice is live and persisted. Organization
-                      admins can claim access, monitor intake volume, and move
-                      between admin and family experiences from the same
-                      account.
+                      Move between club overview, organization configuration,
+                      and user management from one responsive admin shell.
                     </p>
                   </div>
                   <span className="status-chip">
@@ -1117,7 +1459,73 @@ function App() {
                   </span>
                 </div>
 
-                {organizationDraft ? (
+                <div className="admin-nav">
+                  {([
+                    ['overview', 'Overview'],
+                    ['organization', 'Organization'],
+                    ['users', 'Users'],
+                  ] as Array<[AdminWorkspaceView, string]>).map(([view, label]) => (
+                    <button
+                      key={view}
+                      className={`admin-nav__button ${
+                        activeAdminSection === view ? 'admin-nav__button--active' : ''
+                      }`}
+                      type="button"
+                      onClick={() => {
+                        setActiveAdminSection(view);
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {activeAdminSection === 'overview' ? (
+                  <div className="stack-list admin-overview-grid">
+                    <div className="stack-card stack-card--highlight">
+                      <div>
+                        <strong>Club admin functions are now role-aware</strong>
+                        <p>
+                          Organization admins can monitor volume, keep club
+                          settings current, and manage user access without
+                          leaving the portal shell.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="stack-card">
+                      <div>
+                        <strong>User management is live</strong>
+                        <p>
+                          Review portal users, correct parent versus player
+                          onboarding mistakes, assign coach or organization
+                          admin access, and disable accounts when needed.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="stack-card">
+                      <div>
+                        <strong>Shared login still stays intact</strong>
+                        <p>
+                          The same sign-in can support family and staff
+                          workspaces, while organization access remains scoped
+                          under the hood for future multi-club growth.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="stack-card">
+                      <div>
+                        <strong>Next operational slice</strong>
+                        <p>
+                          This foundation is ready for tryout setup,
+                          evaluation workflows, and more staff tools on top of
+                          the same access model.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {activeAdminSection === 'organization' && organizationDraft ? (
                   <>
                     <div className="form-section">
                       <h3>Organization profile</h3>
@@ -1332,94 +1740,503 @@ function App() {
                     </div>
                   </>
                 ) : null}
+
+                {activeAdminSection === 'users' ? (
+                  <div className="admin-users-layout">
+                    <div className="form-section">
+                      <h3>User directory filters</h3>
+                      <div className="admin-filter-grid">
+                        <label className="field admin-search-field">
+                          <span>Search</span>
+                          <input
+                            type="search"
+                            value={adminUserFilters.query}
+                            onChange={(event) => {
+                              setAdminUserFilters((currentValue) => ({
+                                ...currentValue,
+                                query: event.target.value,
+                              }));
+                            }}
+                            placeholder="Search name, email, phone, or role"
+                          />
+                        </label>
+
+                        <label className="field">
+                          <span>Primary role</span>
+                          <select
+                            value={adminUserFilters.primaryRole}
+                            onChange={(event) => {
+                              setAdminUserFilters((currentValue) => ({
+                                ...currentValue,
+                                primaryRole: event.target.value as PrimaryRole | 'all',
+                              }));
+                            }}
+                          >
+                            <option value="all">All account types</option>
+                            <option value="parent">Parent</option>
+                            <option value="player">Player</option>
+                            <option value="staff">Staff</option>
+                          </select>
+                        </label>
+
+                        <label className="field">
+                          <span>Assigned role</span>
+                          <select
+                            value={adminUserFilters.assignedRole}
+                            onChange={(event) => {
+                              setAdminUserFilters((currentValue) => ({
+                                ...currentValue,
+                                assignedRole: event.target.value as AppRole | 'all',
+                              }));
+                            }}
+                          >
+                            <option value="all">All assigned roles</option>
+                            <option value="club-admin">Organization Admin</option>
+                            <option value="coach">Coach</option>
+                            <option value="staff">Staff</option>
+                            <option value="parent">Parent</option>
+                            <option value="player">Player</option>
+                          </select>
+                        </label>
+
+                        <label className="field">
+                          <span>Account status</span>
+                          <select
+                            value={adminUserFilters.accountStatus}
+                            onChange={(event) => {
+                              setAdminUserFilters((currentValue) => ({
+                                ...currentValue,
+                                accountStatus: event.target.value as AccountStatus | 'all',
+                              }));
+                            }}
+                          >
+                            <option value="all">Active and disabled</option>
+                            <option value="ACTIVE">Active</option>
+                            <option value="DISABLED">Disabled</option>
+                          </select>
+                        </label>
+                      </div>
+
+                      <div className="action-row">
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => {
+                            applyAdminUserFilters(adminUserFilters);
+                          }}
+                          disabled={adminUsersLoading}
+                        >
+                          Apply filters
+                        </button>
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          onClick={() => {
+                            setAdminUserFilters(defaultAdminUserFilters);
+                            applyAdminUserFilters(defaultAdminUserFilters);
+                          }}
+                          disabled={adminUsersLoading}
+                        >
+                          Clear filters
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="form-section">
+                      <div className="card-header card-header--compact">
+                        <div>
+                          <p className="section-eyebrow">User Directory</p>
+                          <h3>Review and manage portal users</h3>
+                          <p className="section-copy">
+                            Correct onboarding mistakes, assign staff access,
+                            and disable or restore accounts as needed.
+                          </p>
+                        </div>
+                        <span className="status-chip">
+                          {adminUsersLoading
+                            ? 'Loading users...'
+                            : `Page ${adminUsersHistory.length + 1}`}
+                        </span>
+                      </div>
+
+                      {!adminUsersLoaded && adminUsersLoading ? (
+                        <p className="section-copy">Loading the user directory...</p>
+                      ) : adminUsers.length === 0 ? (
+                        <div className="empty-state-card">
+                          <strong>No users matched these filters.</strong>
+                          <p>
+                            Adjust the filters or clear them to review other
+                            portal accounts.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="admin-user-list">
+                          {adminUsers.map((user) => (
+                            <button
+                              key={user.userId}
+                              className={`admin-user-row ${
+                                user.userId === selectedAdminUserId
+                                  ? 'admin-user-row--active'
+                                  : ''
+                              }`}
+                              type="button"
+                              onClick={() => {
+                                setSelectedAdminUserId(user.userId);
+                              }}
+                            >
+                              <div className="admin-user-row__content">
+                                <div>
+                                  <strong>{getDirectoryUserName(user)}</strong>
+                                  <p>{user.email}</p>
+                                </div>
+                                <div className="role-pill-row">
+                                  {(user.assignedRoles.length > 0
+                                    ? user.assignedRoles
+                                    : (['staff'] as AppRole[])
+                                  ).map((role) => (
+                                    <span key={`${user.userId}-${role}`} className="role-pill">
+                                      {ROLE_LABELS[role]}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                              <span
+                                className={`status-chip ${
+                                  user.accountStatus === 'DISABLED'
+                                    ? 'status-chip--warning'
+                                    : ''
+                                }`}
+                              >
+                                {formatAccountStatus(user.accountStatus)}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="admin-pagination">
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          onClick={() => {
+                            const previousCursor =
+                              adminUsersHistory[adminUsersHistory.length - 1] ?? null;
+                            setAdminUsersHistory((currentValue) =>
+                              currentValue.slice(0, -1),
+                            );
+                            setAdminUsersCursor(previousCursor);
+                          }}
+                          disabled={adminUsersLoading || adminUsersHistory.length === 0}
+                        >
+                          Previous
+                        </button>
+                        <p className="helper-copy">
+                          Showing up to {ADMIN_USERS_PAGE_SIZE} users at a time.
+                        </p>
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => {
+                            if (!adminUsersNextCursor) return;
+                            setAdminUsersHistory((currentValue) => [
+                              ...currentValue,
+                              adminUsersCursor,
+                            ]);
+                            setAdminUsersCursor(adminUsersNextCursor);
+                          }}
+                          disabled={adminUsersLoading || !adminUsersNextCursor}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </article>
             </div>
 
             <div className="workspace-sidebar">
-              {userProfileCard}
-
-              <article className="card">
-                <div className="sidebar-header">
-                  <div>
-                    <p className="section-eyebrow">Current Access</p>
-                    <h3>Available workspaces</h3>
+              {activeAdminSection === 'users' ? (
+                <article className="card">
+                  <div className="card-header">
+                    <div>
+                      <p className="section-eyebrow">User Access</p>
+                      <h3>
+                        {selectedAdminUser
+                          ? getDirectoryUserName(selectedAdminUser)
+                          : 'Select a user'}
+                      </h3>
+                      <p className="section-copy">
+                        {selectedAdminUser
+                          ? selectedAdminUser.email
+                          : 'Choose a user from the directory to review or update access.'}
+                      </p>
+                    </div>
+                    {selectedAdminUser ? (
+                      <span
+                        className={`status-chip ${
+                          selectedAdminUser.accountStatus === 'DISABLED'
+                            ? 'status-chip--warning'
+                            : ''
+                        }`}
+                      >
+                        {formatAccountStatus(selectedAdminUser.accountStatus)}
+                      </span>
+                    ) : null}
                   </div>
-                </div>
-                <div className="stack-list">
-                  {bootstrap.access.organizations.map((organizationAccess) => (
-                    <div
-                      key={organizationAccess.organizationId}
-                      className={`stack-card ${
-                        organizationAccess.organizationId ===
-                        bootstrap.access.activeOrganizationId
-                          ? 'stack-card--highlight'
-                          : ''
-                      }`}
-                    >
-                      <div>
-                        <strong>{organizationAccess.name}</strong>
-                        <p>
-                          {organizationAccess.roles.length > 0
-                            ? organizationAccess.roles
-                                .map((role) => ROLE_LABELS[role])
-                                .join(', ')
-                            : 'No assigned roles yet'}
+
+                  {selectedAdminUser && adminUserDraft ? (
+                    <>
+                      <div className="form-section">
+                        <h3>Account type</h3>
+                        <label className="field">
+                          <span>Primary role</span>
+                          <select
+                            value={adminUserDraft.primaryRole}
+                            onChange={(event) => {
+                              setAdminUserDraft((currentValue) =>
+                                currentValue
+                                  ? {
+                                      ...currentValue,
+                                      primaryRole: event.target.value as PrimaryRole,
+                                    }
+                                  : currentValue,
+                              );
+                            }}
+                          >
+                            <option value="parent">Parent</option>
+                            <option value="player">Player</option>
+                            <option value="staff">Staff</option>
+                          </select>
+                        </label>
+                        <p className="helper-copy">
+                          Use this when a user selected the wrong starting role
+                          during first login.
                         </p>
                       </div>
-                    </div>
-                  ))}
 
-                  {availableRoles.map((role) => (
-                    <button
-                      key={role}
-                      className={`role-card ${
-                        role === activeRole ? 'option-card--selected' : ''
-                      }`}
-                      type="button"
-                      onClick={() => {
-                        setActiveRole(role);
-                      }}
-                    >
-                      <strong>{ROLE_LABELS[role]}</strong>
-                      <span>
-                        {role === activeRole
-                          ? 'Currently active in this session.'
-                          : 'Switch to this workspace.'}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </article>
+                      <div className="form-section">
+                        <h3>Organization access</h3>
+                        <label className="checkbox-field">
+                          <input
+                            type="checkbox"
+                            checked={adminUserDraft.organizationRoles.includes('club-admin')}
+                            onChange={(event) => {
+                              setAdminUserDraft((currentValue) =>
+                                currentValue
+                                  ? {
+                                      ...currentValue,
+                                      organizationRoles: toggleOrganizationRole(
+                                        currentValue.organizationRoles,
+                                        'club-admin',
+                                        event.target.checked,
+                                      ),
+                                    }
+                                  : currentValue,
+                              );
+                            }}
+                          />
+                          <div>
+                            <strong>Organization Admin</strong>
+                            <p className="helper-copy">
+                              Grants club settings and user-management access.
+                            </p>
+                          </div>
+                        </label>
 
-              <article className="card">
-                <div className="sidebar-header">
-                  <div>
-                    <p className="section-eyebrow">Architecture Direction</p>
-                    <h3>Shared login, org-aware access</h3>
-                  </div>
-                </div>
-                <div className="stack-list">
-                  <div className="stack-card">
-                    <div>
-                      <strong>What is live now</strong>
+                        <label className="checkbox-field">
+                          <input
+                            type="checkbox"
+                            checked={adminUserDraft.organizationRoles.includes('coach')}
+                            onChange={(event) => {
+                              setAdminUserDraft((currentValue) =>
+                                currentValue
+                                  ? {
+                                      ...currentValue,
+                                      organizationRoles: toggleOrganizationRole(
+                                        currentValue.organizationRoles,
+                                        'coach',
+                                        event.target.checked,
+                                      ),
+                                    }
+                                  : currentValue,
+                              );
+                            }}
+                          />
+                          <div>
+                            <strong>Coach</strong>
+                            <p className="helper-copy">
+                              Prepares the account for coach-specific staff
+                              workflows as they come online.
+                            </p>
+                          </div>
+                        </label>
+                      </div>
+
+                      <div className="form-section">
+                        <h3>Account status</h3>
+                        <label className="field">
+                          <span>Status</span>
+                          <select
+                            value={adminUserDraft.accountStatus}
+                            onChange={(event) => {
+                              setAdminUserDraft((currentValue) =>
+                                currentValue
+                                  ? {
+                                      ...currentValue,
+                                      accountStatus: event.target.value as AccountStatus,
+                                    }
+                                  : currentValue,
+                              );
+                            }}
+                          >
+                            <option value="ACTIVE">Active</option>
+                            <option value="DISABLED">Disabled</option>
+                          </select>
+                        </label>
+                        <p className="helper-copy">
+                          Disabled users can still authenticate, but the portal
+                          blocks all non-bootstrap actions until re-enabled.
+                        </p>
+                      </div>
+
+                      <div className="stack-list">
+                        <div className="stack-card">
+                          <div>
+                            <strong>Contact details</strong>
+                            <p>
+                              {selectedAdminUser.contactEmail || 'No contact email added yet'}
+                              {selectedAdminUser.phoneNumber
+                                ? ` - ${selectedAdminUser.phoneNumber}`
+                                : ''}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="stack-card">
+                          <div>
+                            <strong>Profile activity</strong>
+                            <p>
+                              Created {formatTimestamp(selectedAdminUser.createdAt)}.
+                              Updated {formatTimestamp(selectedAdminUser.updatedAt)}.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="footer-note">
+                        <button
+                          className="primary-button"
+                          type="button"
+                          onClick={() => {
+                            void handleSaveAdminUser();
+                          }}
+                          disabled={busyAction === `save-admin-user-${selectedAdminUser.userId}`}
+                        >
+                          {busyAction === `save-admin-user-${selectedAdminUser.userId}`
+                            ? 'Saving user access...'
+                            : 'Save user access'}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="empty-state-card">
+                      <strong>No user selected</strong>
                       <p>
-                        Organization settings are now persisted, and access data
-                        carries organization membership details under the hood.
+                        Pick a user from the list to change their account type,
+                        organization access, or account status.
                       </p>
                     </div>
-                  </div>
-                  <div className="stack-card">
-                    <div>
-                      <strong>What this enables next</strong>
-                      <p>
-                        The same user pool can later support parents or staff
-                        linked to multiple clubs, with an organization choice
-                        step at sign-in if needed.
-                      </p>
+                  )}
+                </article>
+              ) : (
+                <>
+                  {userProfileCard}
+
+                  <article className="card">
+                    <div className="sidebar-header">
+                      <div>
+                        <p className="section-eyebrow">Current Access</p>
+                        <h3>Available workspaces</h3>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              </article>
+                    <div className="stack-list">
+                      {bootstrap.access.organizations.map((organizationAccess) => (
+                        <div
+                          key={organizationAccess.organizationId}
+                          className={`stack-card ${
+                            organizationAccess.organizationId ===
+                            bootstrap.access.activeOrganizationId
+                              ? 'stack-card--highlight'
+                              : ''
+                          }`}
+                        >
+                          <div>
+                            <strong>{organizationAccess.name}</strong>
+                            <p>
+                              {organizationAccess.roles.length > 0
+                                ? organizationAccess.roles
+                                    .map((role) => ROLE_LABELS[role])
+                                    .join(', ')
+                                : 'No assigned roles yet'}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+
+                      {availableRoles.map((role) => (
+                        <button
+                          key={role}
+                          className={`role-card ${
+                            role === activeRole ? 'option-card--selected' : ''
+                          }`}
+                          type="button"
+                          onClick={() => {
+                            setActiveRole(role);
+                          }}
+                        >
+                          <strong>{ROLE_LABELS[role]}</strong>
+                          <span>
+                            {role === activeRole
+                              ? 'Currently active in this session.'
+                              : 'Switch to this workspace.'}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </article>
+
+                  <article className="card">
+                    <div className="sidebar-header">
+                      <div>
+                        <p className="section-eyebrow">Architecture Direction</p>
+                        <h3>Shared login, org-aware access</h3>
+                      </div>
+                    </div>
+                    <div className="stack-list">
+                      <div className="stack-card">
+                        <div>
+                          <strong>What is live now</strong>
+                          <p>
+                            Organization settings and staff-side user access are
+                            now persisted, and access data already carries
+                            organization membership details.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="stack-card">
+                        <div>
+                          <strong>What this enables next</strong>
+                          <p>
+                            The same user pool can later support parents or
+                            staff linked to multiple clubs, with an
+                            organization-choice step at sign-in if needed.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                </>
+              )}
             </div>
           </section>
         ) : activeRole === 'staff' ? (
@@ -1429,41 +2246,78 @@ function App() {
                 <div className="card-header">
                   <div>
                     <p className="section-eyebrow">Staff Workspace</p>
-                    <h2>Staff access is waiting on club assignment</h2>
+                    <h2>Navigate your staff functions</h2>
                     <p className="section-copy">
-                      This account is now registered as staff. Update the user
-                      profile on the right, and once a club admin assigns coach,
-                      manager, or administrator access, those workspaces will
-                      appear in the account menu.
+                      Staff accounts can move between workspace overview and
+                      personal profile settings without leaving the main portal
+                      flow.
                     </p>
                   </div>
                   <span className="status-chip">Awaiting assignment</span>
                 </div>
 
-                <div className="stack-list">
-                  <div className="stack-card">
-                    <div>
-                      <strong>What you can do now</strong>
-                      <p>
-                        Keep your name and contact details current so staff
-                        communications can work cleanly from day one.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="stack-card">
-                    <div>
-                      <strong>What unlocks next</strong>
-                      <p>
-                        Club-admin assignment will enable coach, manager, or
-                        organization-admin tools without creating a new login.
-                      </p>
-                    </div>
-                  </div>
+                <div className="admin-nav">
+                  {userWorkspaceSections.map((section) => (
+                    <button
+                      key={section.id}
+                      className={`admin-nav__button ${
+                        activeUserSection === section.id
+                          ? 'admin-nav__button--active'
+                          : ''
+                      }`}
+                      type="button"
+                      onClick={() => {
+                        setActiveUserSection(section.id);
+                      }}
+                    >
+                      {section.label}
+                    </button>
+                  ))}
                 </div>
               </article>
+
+              {activeUserSection === 'overview' ? (
+                <article className="card">
+                  <div className="card-header">
+                    <div>
+                      <p className="section-eyebrow">Staff Workspace</p>
+                      <h2>Staff access is waiting on club assignment</h2>
+                      <p className="section-copy">
+                        This account is registered as staff. Once a club admin
+                        assigns coach or organization-admin access, those
+                        workspaces will appear in the account menu.
+                      </p>
+                    </div>
+                    <span className="status-chip">Awaiting assignment</span>
+                  </div>
+
+                  <div className="stack-list">
+                    <div className="stack-card">
+                      <div>
+                        <strong>What you can do now</strong>
+                        <p>
+                          Keep your name and contact details current so staff
+                          communications can work cleanly from day one.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="stack-card">
+                      <div>
+                        <strong>What unlocks next</strong>
+                        <p>
+                          Club-admin assignment will enable coach, manager, or
+                          organization-admin tools without creating a new login.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              ) : null}
+
+              {activeUserSection === 'profile' ? userProfileCard : null}
             </div>
 
-            <div className="workspace-sidebar">{userProfileCard}</div>
+            <div className="workspace-sidebar">{workspaceAccessCard}</div>
           </section>
         ) : activeRole === 'coach' || activeRole === 'manager' ? (
           <section className="workspace-grid">
@@ -1472,23 +2326,102 @@ function App() {
                 <div className="card-header">
                   <div>
                     <p className="section-eyebrow">Staff Workspace</p>
-                    <h2>{ROLE_LABELS[activeRole]} tools are not enabled yet</h2>
+                    <h2>Navigate your {ROLE_LABELS[activeRole].toLowerCase()} workspace</h2>
                     <p className="section-copy">
-                      This account can hold the role, and the portal shell now
-                      supports switching into it, but no coach or manager
-                      workflow has been activated in this build yet.
+                      Role-based navigation now works here too, even though the
+                      coach and manager operational tools are still coming next.
                     </p>
                   </div>
+                  <span className="status-chip">{ROLE_LABELS[activeRole]}</span>
+                </div>
+
+                <div className="admin-nav">
+                  {userWorkspaceSections.map((section) => (
+                    <button
+                      key={section.id}
+                      className={`admin-nav__button ${
+                        activeUserSection === section.id
+                          ? 'admin-nav__button--active'
+                          : ''
+                      }`}
+                      type="button"
+                      onClick={() => {
+                        setActiveUserSection(section.id);
+                      }}
+                    >
+                      {section.label}
+                    </button>
+                  ))}
                 </div>
               </article>
+
+              {activeUserSection === 'overview' ? (
+                <article className="card">
+                  <div className="card-header">
+                    <div>
+                      <p className="section-eyebrow">Staff Workspace</p>
+                      <h2>{ROLE_LABELS[activeRole]} tools are not enabled yet</h2>
+                      <p className="section-copy">
+                        This account can hold the role, and the portal shell now
+                        supports switching into it, but no coach or manager
+                        workflow has been activated in this build yet.
+                      </p>
+                    </div>
+                  </div>
+                </article>
+              ) : null}
+
+              {activeUserSection === 'profile' ? userProfileCard : null}
             </div>
 
-            <div className="workspace-sidebar">{userProfileCard}</div>
+            <div className="workspace-sidebar">{workspaceAccessCard}</div>
           </section>
         ) : (
           <section className="workspace-grid">
             <div className="workspace-main">
-              {!bootstrap.user.primaryRole ? (
+              <article className="card">
+                <div className="card-header">
+                  <div>
+                    <p className="section-eyebrow">
+                      {familyRole ? 'Family Workspace' : 'Account Setup'}
+                    </p>
+                    <h2>
+                      {familyRole
+                        ? 'Navigate your portal functions'
+                        : 'Finish setting up this account'}
+                    </h2>
+                    <p className="section-copy">
+                      {familyRole
+                        ? 'Move between player profile, tryout intake, linked access, and your own profile from one navigation bar.'
+                        : 'Choose how this login should start, or update your own user profile before continuing.'}
+                    </p>
+                  </div>
+                  {familyRole ? (
+                    <span className="status-chip">{ROLE_LABELS[familyRole]}</span>
+                  ) : null}
+                </div>
+
+                <div className="admin-nav">
+                  {userWorkspaceSections.map((section) => (
+                    <button
+                      key={section.id}
+                      className={`admin-nav__button ${
+                        activeUserSection === section.id
+                          ? 'admin-nav__button--active'
+                          : ''
+                      }`}
+                      type="button"
+                      onClick={() => {
+                        setActiveUserSection(section.id);
+                      }}
+                    >
+                      {section.label}
+                    </button>
+                  ))}
+                </div>
+              </article>
+
+              {!bootstrap.user.primaryRole && activeUserSection === 'setup' ? (
                 <article className="card">
                   <div className="card-header">
                     <div>
@@ -1528,8 +2461,9 @@ function App() {
                 </article>
               ) : null}
 
-              {familyRole && draftPlayer ? (
-                <>
+              {activeUserSection === 'profile' ? userProfileCard : null}
+
+              {familyRole && draftPlayer && activeUserSection === 'player' ? (
                   <article className="card">
                     <div className="card-header">
                       <div>
@@ -1923,195 +2857,237 @@ function App() {
                     </div>
                   </article>
 
-                  <article className="card">
-                    <div className="card-header">
-                      <div>
-                        <p className="section-eyebrow">Tryout Intake</p>
-                        <h2>
-                          {draftPlayer.id ? 'Pre-tryout intake form' : 'Complete tryout intake'}
-                        </h2>
-                        <p className="section-copy">
-                          {bootstrap.organization.intakeIntro}
-                        </p>
-                      </div>
-                      <span className="status-chip">
-                        {selectedPlayer
-                          ? formatIntakeStatus(selectedPlayer.intake.status)
-                          : 'Draft'}
-                      </span>
+              ) : null}
+
+              {familyRole && draftPlayer && activeUserSection === 'intake' ? (
+                <article className="card">
+                  <div className="card-header">
+                    <div>
+                      <p className="section-eyebrow">Tryout Intake</p>
+                      <h2>
+                        {draftPlayer.id ? 'Pre-tryout intake form' : 'Complete tryout intake'}
+                      </h2>
+                      <p className="section-copy">
+                        {bootstrap.organization.intakeIntro}
+                      </p>
                     </div>
+                    <span className="status-chip">
+                      {selectedPlayer ? formatIntakeStatus(selectedPlayer.intake.status) : 'Draft'}
+                    </span>
+                  </div>
 
-                    <div className="form-section">
-                      <h3>Intake details</h3>
-                      <div className="field-grid">
-                        <label className="field">
-                          <span>Completed by</span>
-                          <select
-                            value={draftPlayer.profile.completedBy}
-                            onChange={(event) => {
-                              updateDraftPlayerProfileField(
-                                'completedBy',
-                                event.target.value as PlayerProfileInput['completedBy'],
-                              );
-                            }}
-                          >
-                            {completedByOptions.map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
+                  <div className="form-section">
+                    <h3>Intake details</h3>
+                    <div className="field-grid">
+                      <label className="field">
+                        <span>Completed by</span>
+                        <select
+                          value={draftPlayer.profile.completedBy}
+                          onChange={(event) => {
+                            updateDraftPlayerProfileField(
+                              'completedBy',
+                              event.target.value as PlayerProfileInput['completedBy'],
+                            );
+                          }}
+                        >
+                          {completedByOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                     </div>
+                  </div>
 
-                    <div className="form-section">
-                      <h3>Development priorities</h3>
+                  <div className="form-section">
+                    <h3>Development priorities</h3>
 
-                      <QuestionBlock
-                        title="1) Which outcome matters most for next season?"
-                        fieldName="next-season-outcome"
-                        value={draftPlayer.intake.nextSeasonOutcome}
-                        options={nextSeasonOptions}
-                        onChange={(value) => {
-                          updateDraftPlayerIntakeField('nextSeasonOutcome', value);
-                        }}
-                      />
+                    <QuestionBlock
+                      title="1) Which outcome matters most for next season?"
+                      fieldName="next-season-outcome"
+                      value={draftPlayer.intake.nextSeasonOutcome}
+                      options={nextSeasonOptions}
+                      onChange={(value) => {
+                        updateDraftPlayerIntakeField('nextSeasonOutcome', value);
+                      }}
+                    />
 
-                      <QuestionBlock
-                        title="2) Which development setting would help the player most right now?"
-                        fieldName="development-setting"
-                        value={draftPlayer.intake.developmentSetting}
-                        options={developmentSettingOptions}
-                        onChange={(value) => {
-                          updateDraftPlayerIntakeField('developmentSetting', value);
-                        }}
-                      />
+                    <QuestionBlock
+                      title="2) Which development setting would help the player most right now?"
+                      fieldName="development-setting"
+                      value={draftPlayer.intake.developmentSetting}
+                      options={developmentSettingOptions}
+                      onChange={(value) => {
+                        updateDraftPlayerIntakeField('developmentSetting', value);
+                      }}
+                    />
 
-                      <QuestionBlock
-                        title="3) Which role would the player most value next season, assuming all options are developmentally appropriate?"
-                        fieldName="preferred-role"
-                        value={draftPlayer.intake.preferredRole}
-                        options={preferredRoleOptions}
-                        onChange={(value) => {
-                          updateDraftPlayerIntakeField('preferredRole', value);
-                        }}
-                      />
+                    <QuestionBlock
+                      title="3) Which role would the player most value next season, assuming all options are developmentally appropriate?"
+                      fieldName="preferred-role"
+                      value={draftPlayer.intake.preferredRole}
+                      options={preferredRoleOptions}
+                      onChange={(value) => {
+                        updateDraftPlayerIntakeField('preferredRole', value);
+                      }}
+                    />
 
-                      <QuestionBlock
-                        title="4) What coaching and learning style helps the player most?"
-                        fieldName="coaching-style"
-                        value={draftPlayer.intake.coachingStyle}
-                        options={coachingStyleOptions}
-                        onChange={(value) => {
-                          updateDraftPlayerIntakeField('coachingStyle', value);
-                        }}
-                      />
+                    <QuestionBlock
+                      title="4) What coaching and learning style helps the player most?"
+                      fieldName="coaching-style"
+                      value={draftPlayer.intake.coachingStyle}
+                      options={coachingStyleOptions}
+                      onChange={(value) => {
+                        updateDraftPlayerIntakeField('coachingStyle', value);
+                      }}
+                    />
 
-                      <QuestionBlock
-                        title="5) Are there any known participation considerations staff should keep in mind?"
-                        fieldName="participation-considerations"
-                        value={draftPlayer.intake.participationConsiderations}
-                        options={participationOptions}
-                        onChange={(value) => {
+                    <QuestionBlock
+                      title="5) Are there any known participation considerations staff should keep in mind?"
+                      fieldName="participation-considerations"
+                      value={draftPlayer.intake.participationConsiderations}
+                      options={participationOptions}
+                      onChange={(value) => {
+                        updateDraftPlayerIntakeField(
+                          'participationConsiderations',
+                          value,
+                        );
+                      }}
+                    />
+
+                    <label className="field">
+                      <span>If helpful, brief note</span>
+                      <input
+                        type="text"
+                        value={draftPlayer.intake.participationConsiderationsNote}
+                        onChange={(event) => {
                           updateDraftPlayerIntakeField(
-                            'participationConsiderations',
-                            value,
+                            'participationConsiderationsNote',
+                            event.target.value,
                           );
                         }}
+                        maxLength={120}
+                        placeholder="Example: one fall weekend unavailable due to family event"
                       />
+                    </label>
 
-                      <label className="field">
-                        <span>If helpful, brief note</span>
-                        <input
-                          type="text"
-                          value={draftPlayer.intake.participationConsiderationsNote}
-                          onChange={(event) => {
-                            updateDraftPlayerIntakeField(
-                              'participationConsiderationsNote',
-                              event.target.value,
-                            );
-                          }}
-                          maxLength={120}
-                          placeholder="Example: one fall weekend unavailable due to family event"
-                        />
-                      </label>
+                    <label className="field">
+                      <span>
+                        6) Is there one thing you want staff to understand about
+                        the player's development fit?
+                      </span>
+                      <textarea
+                        value={draftPlayer.intake.additionalInsight}
+                        onChange={(event) => {
+                          updateDraftPlayerIntakeField(
+                            'additionalInsight',
+                            event.target.value,
+                          );
+                        }}
+                        placeholder="Optional - one clear insight only"
+                      />
+                    </label>
+                  </div>
 
-                      <label className="field">
-                        <span>
-                          6) Is there one thing you want staff to understand about
-                          the player's development fit?
-                        </span>
-                        <textarea
-                          value={draftPlayer.intake.additionalInsight}
-                          onChange={(event) => {
-                            updateDraftPlayerIntakeField(
-                              'additionalInsight',
-                              event.target.value,
-                            );
-                          }}
-                          placeholder="Optional - one clear insight only"
-                        />
-                      </label>
-                    </div>
-
-                    <div className="footer-note">
-                      <p className="helper-copy">
-                        {selectedPlayer?.intake.updatedAt
-                          ? `Last updated ${formatTimestamp(
-                              selectedPlayer.intake.updatedAt,
-                            )}.`
-                          : 'Save a draft whenever you need to pause and come back.'}
-                      </p>
-                      <div className="action-row">
-                        <button
-                          className="secondary-button"
-                          type="button"
-                          onClick={() => {
-                            void handleSavePlayer('draft');
-                          }}
-                          disabled={
-                            busyAction === 'create-draft' ||
-                            busyAction === 'update-draft' ||
-                            busyAction === 'create-submitted' ||
-                            busyAction === 'update-submitted'
-                          }
-                        >
-                          {busyAction === 'create-draft' ||
-                          busyAction === 'update-draft'
-                            ? 'Saving draft...'
-                            : 'Save draft'}
-                        </button>
-                        <button
-                          className="primary-button"
-                          type="button"
-                          onClick={() => {
-                            void handleSavePlayer('submitted');
-                          }}
-                          disabled={
-                            busyAction === 'create-draft' ||
-                            busyAction === 'update-draft' ||
-                            busyAction === 'create-submitted' ||
-                            busyAction === 'update-submitted'
-                          }
-                        >
-                          {busyAction === 'create-submitted' ||
+                  <div className="footer-note">
+                    <p className="helper-copy">
+                      {selectedPlayer?.intake.updatedAt
+                        ? `Last updated ${formatTimestamp(
+                            selectedPlayer.intake.updatedAt,
+                          )}.`
+                        : 'Save a draft whenever you need to pause and come back.'}
+                    </p>
+                    <div className="action-row">
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => {
+                          void handleSavePlayer('draft');
+                        }}
+                        disabled={
+                          busyAction === 'create-draft' ||
+                          busyAction === 'update-draft' ||
+                          busyAction === 'create-submitted' ||
                           busyAction === 'update-submitted'
-                            ? 'Submitting...'
-                            : selectedPlayer?.intake.status === 'submitted'
-                              ? 'Save submitted form'
-                              : 'Submit form'}
-                        </button>
+                        }
+                      >
+                        {busyAction === 'create-draft' ||
+                        busyAction === 'update-draft'
+                          ? 'Saving draft...'
+                          : 'Save draft'}
+                      </button>
+                      <button
+                        className="primary-button"
+                        type="button"
+                        onClick={() => {
+                          void handleSavePlayer('submitted');
+                        }}
+                        disabled={
+                          busyAction === 'create-draft' ||
+                          busyAction === 'update-draft' ||
+                          busyAction === 'create-submitted' ||
+                          busyAction === 'update-submitted'
+                        }
+                      >
+                        {busyAction === 'create-submitted' ||
+                        busyAction === 'update-submitted'
+                          ? 'Submitting...'
+                          : selectedPlayer?.intake.status === 'submitted'
+                            ? 'Save submitted form'
+                            : 'Submit form'}
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              ) : null}
+
+              {familyRole && activeUserSection === 'invites' ? (
+                <article className="card">
+                  <div className="card-header">
+                    <div>
+                      <p className="section-eyebrow">Linked Access</p>
+                      <h2>Manage parent and player connections</h2>
+                      <p className="section-copy">
+                        Use this section to invite the linked parent or player
+                        account for the selected record, review sent invites,
+                        and respond to invites that were sent to this login.
+                      </p>
+                    </div>
+                    <span className="status-chip">
+                      {selectedPlayer
+                        ? `${selectedPlayer.sentInvites.length} sent`
+                        : `${bootstrap.receivedInvites.length} received`}
+                    </span>
+                  </div>
+
+                  <div className="stack-list">
+                    <div className="stack-card">
+                      <div>
+                        <strong>Selected player</strong>
+                        <p>
+                          {selectedPlayer
+                            ? getPlayerDisplayName(selectedPlayer.profile)
+                            : 'Save or choose a player record to enable linked access tools.'}
+                        </p>
                       </div>
                     </div>
-                  </article>
-                </>
+                    <div className="stack-card">
+                      <div>
+                        <strong>What is managed here</strong>
+                        <p>
+                          Linked access stays attached to the player record, so
+                          the right parent and player logins remain connected
+                          over time.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </article>
               ) : null}
             </div>
 
             <div className="workspace-sidebar">
-              {userProfileCard}
-
               {familyRole ? (
                 <article className="card">
                   <div className="sidebar-header">
@@ -2190,7 +3166,7 @@ function App() {
                 </article>
               ) : null}
 
-              {familyRole ? (
+              {familyRole && activeUserSection === 'invites' ? (
                 <article className="card">
                   <div className="sidebar-header">
                     <div>
@@ -2292,7 +3268,7 @@ function App() {
                 </article>
               ) : null}
 
-              {familyRole ? (
+              {familyRole && activeUserSection === 'invites' ? (
                 <article className="card">
                   <div className="sidebar-header">
                     <div>
@@ -2354,6 +3330,8 @@ function App() {
                   </div>
                 </article>
               ) : null}
+
+              {!familyRole ? workspaceAccessCard : null}
             </div>
           </section>
         )}
@@ -2596,6 +3574,80 @@ function buildOrganizationSettingsDraft(
   };
 }
 
+function buildEditableAdminUserState(
+  user: AdminUserDirectoryEntry,
+): EditableAdminUserState {
+  return {
+    primaryRole: user.primaryRole ?? 'staff',
+    organizationRoles: [...user.organizationRoles],
+    accountStatus: user.accountStatus,
+  };
+}
+
+function toggleOrganizationRole(
+  roles: AdminOrganizationRole[],
+  role: AdminOrganizationRole,
+  checked: boolean,
+): AdminOrganizationRole[] {
+  if (checked) return [...new Set<AdminOrganizationRole>([...roles, role])];
+  return roles.filter((entry) => entry !== role);
+}
+
+function getDirectoryUserName(user: AdminUserDirectoryEntry): string {
+  const nextValue = `${user.firstName} ${user.lastName}`.trim();
+  return nextValue || user.email;
+}
+
+function getUserWorkspaceSections(
+  activeRole: AppRole | null,
+  primaryRole: PrimaryRole | null,
+): Array<{ id: UserWorkspaceView; label: string }> {
+  if (activeRole === 'club-admin' || activeRole === 'platform-admin') return [];
+
+  if (activeRole === 'parent' || activeRole === 'player') {
+    return [
+      {
+        id: 'player',
+        label: activeRole === 'parent' ? 'Player Profile' : 'My Player Profile',
+      },
+      { id: 'intake', label: 'Tryout Intake' },
+      { id: 'invites', label: 'Linked Access' },
+      { id: 'profile', label: 'My Profile' },
+    ];
+  }
+
+  if (activeRole === 'staff' || activeRole === 'coach' || activeRole === 'manager') {
+    return [
+      { id: 'overview', label: 'Overview' },
+      { id: 'profile', label: 'My Profile' },
+    ];
+  }
+
+  if (!primaryRole) {
+    return [
+      { id: 'setup', label: 'Get Started' },
+      { id: 'profile', label: 'My Profile' },
+    ];
+  }
+
+  if (primaryRole === 'parent' || primaryRole === 'player') {
+    return [
+      {
+        id: 'player',
+        label: primaryRole === 'parent' ? 'Player Profile' : 'My Player Profile',
+      },
+      { id: 'intake', label: 'Tryout Intake' },
+      { id: 'invites', label: 'Linked Access' },
+      { id: 'profile', label: 'My Profile' },
+    ];
+  }
+
+  return [
+    { id: 'overview', label: 'Overview' },
+    { id: 'profile', label: 'My Profile' },
+  ];
+}
+
 function resolveInviteRole(role: AppRole | UserRole | null): UserRole | null {
   if (role === 'parent') return 'player';
   if (role === 'player') return 'parent';
@@ -2756,6 +3808,10 @@ function describeWorkspace(
   if (primaryRole === 'staff') return 'Primary account type: Staff.';
   if (primaryRole) return `Primary family role: ${ROLE_LABELS[primaryRole]}.`;
   return 'Choose the role that matches this account.';
+}
+
+function formatAccountStatus(status: AccountStatus): string {
+  return status === 'DISABLED' ? 'Disabled' : 'Active';
 }
 
 function formatTimestamp(value: string | null): string {
