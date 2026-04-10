@@ -40,6 +40,21 @@ const defaultOrganization = {
     'Please complete the brief form below. Responses are intended to help staff understand what type of environment may best accelerate the player\'s growth, along with coaching and learning preferences and any practical considerations ahead of tryouts. There are no "right" answers, and responses do not determine placement. This is not a scored part of tryouts and does not replace on-ice evaluation. The goal is simply better information in service of better development.',
 } as const;
 
+const TRYOUT_TEAM_COLOR_PRESETS = [
+  { value: '#1F3D7A', aliases: ['navy'] },
+  { value: '#2D6CDF', aliases: ['blue'] },
+  { value: '#C63B34', aliases: ['red'] },
+  { value: '#E67E22', aliases: ['orange'] },
+  { value: '#D6A129', aliases: ['gold', 'yellow'] },
+  { value: '#2E8B57', aliases: ['green'] },
+  { value: '#1F2328', aliases: ['black'] },
+  { value: '#F6F7F8', aliases: ['white'] },
+  { value: '#8A949F', aliases: ['gray', 'grey', 'silver'] },
+  { value: '#7059A6', aliases: ['purple'] },
+] as const;
+
+const DEFAULT_TRYOUT_TEAM_COLOR = TRYOUT_TEAM_COLOR_PRESETS[0].value;
+
 type UserRole = 'parent' | 'player';
 type PrimaryRole = UserRole | 'staff';
 type AppRole = PrimaryRole | 'coach' | 'manager' | 'club-admin' | 'platform-admin';
@@ -117,6 +132,7 @@ type TryoutTeam = {
   id: string;
   groupId: string;
   name: string;
+  jerseyColor: string;
 };
 
 type TryoutSession = {
@@ -484,6 +500,7 @@ type SerializedEvaluationSessionPlayer = {
   groupName: string;
   teamId: string;
   teamName: string;
+  jerseyColor: string;
   birthYear: string;
   lastTeamName: string;
   position: string;
@@ -499,6 +516,7 @@ type SerializedEvaluationSessionTeam = {
   name: string;
   groupId: string;
   groupName: string;
+  jerseyColor: string;
   players: SerializedEvaluationSessionPlayer[];
 };
 
@@ -1401,6 +1419,7 @@ async function getEvaluationSessionContextResponse(
       name: team.name,
       groupId: team.groupId,
       groupName: getTryoutGroupName(team.groupId, groups),
+      jerseyColor: team.jerseyColor,
       players: playerSummaries
         .filter((summary) => summary.teamId === team.id)
         .map((summary) => {
@@ -3017,6 +3036,13 @@ function sanitizeTryoutTeams(
 
   return sourceTeams.map((team, index) => {
     const record = asRecord(team);
+    const fallbackColor = normalizeTryoutTeamColor(
+      fallback[index]?.jerseyColor,
+      getDefaultTryoutTeamColor(
+        typeof record.name === 'string' ? record.name : fallback[index]?.name ?? '',
+        index,
+      ),
+    );
     const sanitizedTeam: TryoutTeam = {
       id: sanitizeIdentifier(record.id),
       groupId: sanitizeFreeText(record.groupId),
@@ -3024,6 +3050,11 @@ function sanitizeTryoutTeams(
         typeof record.name === 'string' ? record.name : undefined,
         `Team ${index + 1}`,
         `Tryout team ${index + 1} name`,
+      ),
+      jerseyColor: sanitizeColor(
+        typeof record.jerseyColor === 'string' ? record.jerseyColor : undefined,
+        fallbackColor,
+        `Tryout team ${index + 1} jersey color`,
       ),
     };
 
@@ -3510,7 +3541,24 @@ function sanitizeColor(value: string | undefined, fallback: string, fieldLabel: 
   if (!/^#[0-9a-fA-F]{6}$/.test(nextValue)) {
     throw badRequest(`${fieldLabel} must be a 6-digit hex color.`);
   }
-  return nextValue;
+  return nextValue.toUpperCase();
+}
+
+function normalizeTryoutTeamColor(value: string | undefined, fallback: string): string {
+  const nextValue = sanitizeFreeText(value).toUpperCase();
+  const normalizedFallback = sanitizeFreeText(fallback).toUpperCase();
+  if (/^#[0-9A-F]{6}$/.test(nextValue)) return nextValue;
+  if (/^#[0-9A-F]{6}$/.test(normalizedFallback)) return normalizedFallback;
+  return DEFAULT_TRYOUT_TEAM_COLOR;
+}
+
+function getDefaultTryoutTeamColor(teamName: string, index: number): string {
+  const normalizedName = teamName.trim().toLowerCase();
+  const matchedPreset = TRYOUT_TEAM_COLOR_PRESETS.find((preset) =>
+    preset.aliases.some((alias) => normalizedName.includes(alias)),
+  );
+
+  return matchedPreset?.value ?? TRYOUT_TEAM_COLOR_PRESETS[index % TRYOUT_TEAM_COLOR_PRESETS.length].value;
 }
 
 function sanitizeFreeText(value: unknown, fallback = ''): string {
@@ -3687,6 +3735,7 @@ function serializeEvaluationSessionPlayer(
     groupName: getTryoutGroupName(team.groupId, groups),
     teamId: team.id,
     teamName: team.name,
+    jerseyColor: team.jerseyColor,
     birthYear: profile.birthYear,
     lastTeamName: latestTeam?.teamName || profile.currentTeam,
     position: profile.primaryPosition || profile.positions,

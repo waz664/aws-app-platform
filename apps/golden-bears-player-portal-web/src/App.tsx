@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import './App.css';
 import {
@@ -244,6 +245,7 @@ type TryoutSetupCardProps = {
   ) => void;
   onAddTeam: (groupId: string) => void;
   onUpdateTeamName: (teamId: string, value: string) => void;
+  onUpdateTeamColor: (teamId: string, value: string) => void;
   onRemoveTeam: (teamId: string) => void;
   onAssignPlayerToTeam: (playerId: string, teamId: string | null) => void;
   onUpdatePlayerJersey: (playerId: string, value: string) => void;
@@ -331,6 +333,22 @@ const TRYOUT_GENDERS: TryoutGender[] = [
   'Non-binary',
   'Prefer not to say',
 ];
+
+const TRYOUT_TEAM_COLOR_PRESETS = [
+  { label: 'Navy', value: '#1F3D7A', aliases: ['navy'] },
+  { label: 'Blue', value: '#2D6CDF', aliases: ['blue'] },
+  { label: 'Red', value: '#C63B34', aliases: ['red'] },
+  { label: 'Orange', value: '#E67E22', aliases: ['orange'] },
+  { label: 'Gold', value: '#D6A129', aliases: ['gold', 'yellow'] },
+  { label: 'Green', value: '#2E8B57', aliases: ['green'] },
+  { label: 'Black', value: '#1F2328', aliases: ['black'] },
+  { label: 'White', value: '#F6F7F8', aliases: ['white'] },
+  { label: 'Gray', value: '#8A949F', aliases: ['gray', 'grey', 'silver'] },
+  { label: 'Purple', value: '#7059A6', aliases: ['purple'] },
+] as const;
+
+const DEFAULT_TRYOUT_TEAM_COLOR = TRYOUT_TEAM_COLOR_PRESETS[0].value;
+const TRYOUT_TEAM_PANEL_SURFACE = '#FBFCFD';
 
 const playerGenderOptions = [
   { value: 'Male', label: 'Male' },
@@ -2206,8 +2224,9 @@ function App() {
 
   function addTryoutTeam(groupId: string): void {
     applyTryoutDraft((draft) => {
-      const nextTeamNumber =
-        draft.teams.filter((team) => team.groupId === groupId).length + 1;
+      const nextGroupTeamCount = draft.teams.filter((team) => team.groupId === groupId).length;
+      const nextTeamNumber = nextGroupTeamCount + 1;
+      const teamName = `Team ${nextTeamNumber}`;
 
       return {
         ...draft,
@@ -2216,7 +2235,8 @@ function App() {
           {
             id: crypto.randomUUID(),
             groupId,
-            name: `Team ${nextTeamNumber}`,
+            name: teamName,
+            jerseyColor: getDefaultTryoutTeamColor(teamName, nextGroupTeamCount),
           },
         ],
       };
@@ -2231,6 +2251,20 @@ function App() {
           ? {
               ...team,
               name: value,
+            }
+          : team,
+      ),
+    }));
+  }
+
+  function updateTryoutTeamColor(teamId: string, value: string): void {
+    applyTryoutDraft((draft) => ({
+      ...draft,
+      teams: draft.teams.map((team) =>
+        team.id === teamId
+          ? {
+              ...team,
+              jerseyColor: normalizeHexColor(value, team.jerseyColor),
             }
           : team,
       ),
@@ -2759,6 +2793,7 @@ function App() {
       onSetPlayerAssignment={setTryoutPlayerAssignment}
       onAddTeam={addTryoutTeam}
       onUpdateTeamName={updateTryoutTeamName}
+      onUpdateTeamColor={updateTryoutTeamColor}
       onRemoveTeam={removeTryoutTeam}
       onAssignPlayerToTeam={assignTryoutPlayerToTeam}
       onUpdatePlayerJersey={updateTryoutPlayerJersey}
@@ -6618,6 +6653,7 @@ function TryoutSetupCard({
   onSetPlayerAssignment,
   onAddTeam,
   onUpdateTeamName,
+  onUpdateTeamColor,
   onRemoveTeam,
   onAssignPlayerToTeam,
   onUpdatePlayerJersey,
@@ -6633,6 +6669,7 @@ function TryoutSetupCard({
   const groups = draft?.groups ?? [];
   const teams = draft?.teams ?? [];
   const sessions = draft?.sessions ?? [];
+  const teamMap = new Map(teams.map((team) => [team.id, team]));
   const unassignedPlayers = draft
     ? draft.players.filter((player) => player.effectiveGroupId === null)
     : [];
@@ -6700,6 +6737,8 @@ function TryoutSetupCard({
     player: TryoutPlayerSummary,
     groupTeams: TryoutSeason['teams'],
   ) {
+    const selectedTeam = player.teamId ? teamMap.get(player.teamId) ?? null : null;
+
     return (
       <div
         key={player.playerId}
@@ -6714,10 +6753,19 @@ function TryoutSetupCard({
       >
         <div>
           <strong>{player.displayName}</strong>
-          <p>
-            {player.teamId
-              ? `Team: ${getTryoutTeamLabel(player.teamId, teams)}`
-              : 'Not assigned to a tryout team yet'}
+          <p className="tryout-player-card__team-note">
+            {selectedTeam ? (
+              <>
+                <span
+                  className="team-color-dot"
+                  style={buildTeamDotStyle(selectedTeam.jerseyColor)}
+                  aria-hidden="true"
+                />
+                Team: {selectedTeam.name}
+              </>
+            ) : (
+              'Not assigned to a tryout team yet'
+            )}
           </p>
         </div>
         <div className="tryout-player-card__controls">
@@ -7151,11 +7199,16 @@ function TryoutSetupCard({
                           const roster = groupPlayers.filter(
                             (player) => player.teamId === team.id,
                           );
+                          const teamColor = normalizeHexColor(
+                            team.jerseyColor,
+                            getDefaultTryoutTeamColor(team.name, groupTeams.indexOf(team)),
+                          );
 
                           return (
                             <div
                               key={team.id}
-                              className="tryout-team-column"
+                              className="tryout-team-column tryout-team-column--team"
+                              style={buildTryoutTeamColumnStyle(teamColor)}
                               onDragOver={(event) => {
                                 event.preventDefault();
                               }}
@@ -7182,6 +7235,61 @@ function TryoutSetupCard({
                                     onRemoveTeam(team.id);
                                   }}
                                 />
+                              </div>
+
+                              <div className="tryout-team-column__meta">
+                                <div className="tryout-team-column__color-row">
+                                  <label className="field tryout-team-color-field">
+                                    <span>Jersey color</span>
+                                    <input
+                                      type="color"
+                                      value={teamColor}
+                                      onChange={(event) => {
+                                        onUpdateTeamColor(team.id, event.target.value);
+                                      }}
+                                      aria-label={`Choose jersey color for ${team.name}`}
+                                    />
+                                  </label>
+                                  <div className="tryout-team-color-presets">
+                                    {TRYOUT_TEAM_COLOR_PRESETS.map((preset) => (
+                                      <button
+                                        key={`${team.id}-${preset.value}`}
+                                        className="team-color-preset"
+                                        type="button"
+                                        style={buildTeamColorPresetStyle(
+                                          preset.value,
+                                          teamColor === preset.value,
+                                        )}
+                                        aria-label={`${preset.label} jersey color`}
+                                        aria-pressed={teamColor === preset.value}
+                                        title={preset.label}
+                                        onClick={() => {
+                                          onUpdateTeamColor(team.id, preset.value);
+                                        }}
+                                      />
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <div className="tryout-team-column__summary">
+                                  <span
+                                    className="status-chip"
+                                    style={buildSoftTeamChipStyle(teamColor)}
+                                  >
+                                    <span
+                                      className="team-color-dot"
+                                      style={buildTeamDotStyle(teamColor)}
+                                      aria-hidden="true"
+                                    />
+                                    {formatTryoutTeamColorLabel(teamColor)}
+                                  </span>
+                                  <span
+                                    className="status-chip"
+                                    style={buildSoftTeamChipStyle(teamColor)}
+                                  >
+                                    {roster.length} player{roster.length === 1 ? '' : 's'}
+                                  </span>
+                                </div>
                               </div>
 
                               <div className="stack-list">
@@ -7317,7 +7425,18 @@ function TryoutSetupCard({
                                 );
                               }}
                             />
-                            <span>
+                            <span
+                              className="tryout-team-session-chip"
+                              style={buildTryoutSessionTeamChipStyle(
+                                team.jerseyColor,
+                                session.teamIds.includes(team.id),
+                              )}
+                            >
+                              <span
+                                className="team-color-dot"
+                                style={buildTeamDotStyle(team.jerseyColor)}
+                                aria-hidden="true"
+                              />
                               {team.name} ({getTryoutGroupLabel(team.groupId, groups)})
                             </span>
                           </label>
@@ -7518,18 +7637,20 @@ function EvaluationRosterTeam({
   const completedPlayers = team.players.filter((player) =>
     evaluatedPlayerIds.has(player.playerId),
   );
+  const teamColor = normalizeHexColor(team.jerseyColor, DEFAULT_TRYOUT_TEAM_COLOR);
 
   function renderPlayerButton(
     player: EvaluationSessionContext['teams'][number]['players'][number],
   ) {
+    const isSelected = player.playerId === selectedPlayerId;
+
     return (
       <button
         key={player.playerId}
         className={`evaluation-jersey-button ${
-          player.playerId === selectedPlayerId
-            ? 'evaluation-jersey-button--active'
-            : ''
+          isSelected ? 'evaluation-jersey-button--active' : ''
         }`}
+        style={buildEvaluationJerseyButtonStyle(player.jerseyColor, isSelected)}
         type="button"
         onClick={() => {
           onSelectPlayer(player.playerId);
@@ -7543,13 +7664,25 @@ function EvaluationRosterTeam({
   }
 
   return (
-    <section className="evaluation-roster__team">
+    <section
+      className="evaluation-roster__team"
+      style={buildEvaluationTeamColumnStyle(teamColor)}
+    >
       <div className="evaluation-roster__team-header">
-        <div>
-          <strong>{team.name}</strong>
-          <span>{team.groupName}</span>
+        <div className="evaluation-roster__team-title">
+          <span
+            className="team-color-dot team-color-dot--strong"
+            style={buildTeamDotStyle(teamColor)}
+            aria-hidden="true"
+          />
+          <div>
+            <strong>{team.name}</strong>
+            <span>{team.groupName}</span>
+          </div>
         </div>
-        <span className="status-chip">{team.players.length}</span>
+        <span className="status-chip" style={buildSoftTeamChipStyle(teamColor)}>
+          {team.players.length}
+        </span>
       </div>
 
       {pendingPlayers.length > 0 ? (
@@ -7626,7 +7759,14 @@ function EvaluationPlayerHeader({
           <h2>{headerName}</h2>
           <div className="evaluation-player-bar__chips">
             <span className="status-chip">{player.groupName}</span>
-            <span className="status-chip">{player.teamName}</span>
+            <span className="status-chip" style={buildSoftTeamChipStyle(player.jerseyColor)}>
+              <span
+                className="team-color-dot"
+                style={buildTeamDotStyle(player.jerseyColor)}
+                aria-hidden="true"
+              />
+              {player.teamName}
+            </span>
             <span className="status-chip">
               {record.notes.length} note{record.notes.length === 1 ? '' : 's'}
             </span>
@@ -8248,12 +8388,135 @@ function getTryoutGroupLabel(
   return groups.find((group) => group.id === groupId)?.name ?? 'Unknown group';
 }
 
-function getTryoutTeamLabel(
-  teamId: string | null,
-  teams: TryoutSeason['teams'],
-): string {
-  if (!teamId) return 'Unassigned';
-  return teams.find((team) => team.id === teamId)?.name ?? 'Unknown team';
+function getDefaultTryoutTeamColor(teamName: string, index: number): string {
+  const normalizedName = teamName.trim().toLowerCase();
+  const matchedPreset = TRYOUT_TEAM_COLOR_PRESETS.find((preset) =>
+    preset.aliases.some((alias) => normalizedName.includes(alias)),
+  );
+
+  return matchedPreset?.value ?? TRYOUT_TEAM_COLOR_PRESETS[index % TRYOUT_TEAM_COLOR_PRESETS.length].value;
+}
+
+function normalizeHexColor(value: string | undefined, fallback: string): string {
+  const nextValue = (value ?? '').trim().toUpperCase();
+  const normalizedFallback = fallback.trim().toUpperCase();
+  if (/^#[0-9A-F]{6}$/.test(nextValue)) return nextValue;
+  if (/^#[0-9A-F]{6}$/.test(normalizedFallback)) return normalizedFallback;
+  return DEFAULT_TRYOUT_TEAM_COLOR;
+}
+
+function parseHexColor(value: string): { red: number; green: number; blue: number } {
+  const normalized = normalizeHexColor(value, DEFAULT_TRYOUT_TEAM_COLOR);
+  return {
+    red: Number.parseInt(normalized.slice(1, 3), 16),
+    green: Number.parseInt(normalized.slice(3, 5), 16),
+    blue: Number.parseInt(normalized.slice(5, 7), 16),
+  };
+}
+
+function mixHexColors(primary: string, secondary: string, primaryWeight: number): string {
+  const safeWeight = Math.min(1, Math.max(0, primaryWeight));
+  const secondaryWeight = 1 - safeWeight;
+  const primaryColor = parseHexColor(primary);
+  const secondaryColor = parseHexColor(secondary);
+  const channelToHex = (value: number) => Math.round(value).toString(16).padStart(2, '0');
+
+  return `#${channelToHex(primaryColor.red * safeWeight + secondaryColor.red * secondaryWeight)}${channelToHex(primaryColor.green * safeWeight + secondaryColor.green * secondaryWeight)}${channelToHex(primaryColor.blue * safeWeight + secondaryColor.blue * secondaryWeight)}`.toUpperCase();
+}
+
+function getReadableTextColor(backgroundColor: string): string {
+  const { red, green, blue } = parseHexColor(backgroundColor);
+  const srgb = [red, green, blue].map((channel) => channel / 255).map((channel) =>
+    channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
+  );
+  const luminance = srgb[0] * 0.2126 + srgb[1] * 0.7152 + srgb[2] * 0.0722;
+  return luminance >= 0.45 ? '#173428' : '#FFFFFF';
+}
+
+function formatTryoutTeamColorLabel(teamColor: string): string {
+  const normalized = normalizeHexColor(teamColor, DEFAULT_TRYOUT_TEAM_COLOR);
+  return (
+    TRYOUT_TEAM_COLOR_PRESETS.find((preset) => preset.value === normalized)?.label ??
+    normalized
+  );
+}
+
+function buildTeamDotStyle(teamColor: string): CSSProperties {
+  return {
+    backgroundColor: normalizeHexColor(teamColor, DEFAULT_TRYOUT_TEAM_COLOR),
+  };
+}
+
+function buildSoftTeamChipStyle(teamColor: string): CSSProperties {
+  const normalized = normalizeHexColor(teamColor, DEFAULT_TRYOUT_TEAM_COLOR);
+
+  return {
+    backgroundColor: mixHexColors(normalized, '#FFFFFF', 0.14),
+    boxShadow: `inset 0 0 0 1px ${mixHexColors(normalized, '#173428', 0.5)}`,
+    color: '#173428',
+  };
+}
+
+function buildTeamColorPresetStyle(teamColor: string, isSelected: boolean): CSSProperties {
+  const normalized = normalizeHexColor(teamColor, DEFAULT_TRYOUT_TEAM_COLOR);
+
+  return {
+    backgroundColor: normalized,
+    borderColor: mixHexColors(normalized, '#173428', isSelected ? 0.72 : 0.42),
+    boxShadow: isSelected
+      ? `0 0 0 3px ${mixHexColors(normalized, '#FFFFFF', 0.28)}`
+      : undefined,
+  };
+}
+
+function buildTryoutTeamColumnStyle(teamColor: string): CSSProperties {
+  const normalized = normalizeHexColor(teamColor, DEFAULT_TRYOUT_TEAM_COLOR);
+
+  return {
+    borderColor: mixHexColors(normalized, '#173428', 0.68),
+    backgroundColor: TRYOUT_TEAM_PANEL_SURFACE,
+    boxShadow: `inset 0 0 0 1px ${mixHexColors(normalized, '#FFFFFF', 0.12)}`,
+  };
+}
+
+function buildTryoutSessionTeamChipStyle(
+  teamColor: string,
+  isSelected: boolean,
+): CSSProperties {
+  if (!isSelected) return {};
+
+  const normalized = normalizeHexColor(teamColor, DEFAULT_TRYOUT_TEAM_COLOR);
+  return {
+    backgroundColor: mixHexColors(normalized, '#FFFFFF', 0.12),
+    borderColor: mixHexColors(normalized, '#173428', 0.56),
+    color: '#173428',
+  };
+}
+
+function buildEvaluationTeamColumnStyle(teamColor: string): CSSProperties {
+  const normalized = normalizeHexColor(teamColor, DEFAULT_TRYOUT_TEAM_COLOR);
+
+  return {
+    borderColor: mixHexColors(normalized, '#173428', 0.72),
+    backgroundColor: TRYOUT_TEAM_PANEL_SURFACE,
+    boxShadow: `inset 0 0 0 1px ${mixHexColors(normalized, '#FFFFFF', 0.12)}`,
+  };
+}
+
+function buildEvaluationJerseyButtonStyle(
+  teamColor: string,
+  isSelected: boolean,
+): CSSProperties {
+  const normalized = normalizeHexColor(teamColor, DEFAULT_TRYOUT_TEAM_COLOR);
+
+  return {
+    backgroundColor: normalized,
+    color: getReadableTextColor(normalized),
+    borderColor: mixHexColors(normalized, '#173428', isSelected ? 0.78 : 0.64),
+    boxShadow: isSelected
+      ? `0 0 0 3px ${mixHexColors(normalized, '#FFFFFF', 0.34)}, 0 10px 18px rgba(23, 52, 40, 0.12)`
+      : undefined,
+  };
 }
 
 function buildEmptyEvaluationRecordState(

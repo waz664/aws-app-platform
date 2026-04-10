@@ -139,6 +139,7 @@ export type TryoutTeam = {
   id: string;
   groupId: string;
   name: string;
+  jerseyColor: string;
 };
 
 export type TryoutSession = {
@@ -216,6 +217,7 @@ export type EvaluationSessionPlayer = {
   groupName: string;
   teamId: string;
   teamName: string;
+  jerseyColor: string;
   birthYear: string;
   lastTeamName: string;
   position: string;
@@ -231,6 +233,7 @@ export type EvaluationSessionTeam = {
   name: string;
   groupId: string;
   groupName: string;
+  jerseyColor: string;
   players: EvaluationSessionPlayer[];
 };
 
