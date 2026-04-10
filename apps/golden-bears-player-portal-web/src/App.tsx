@@ -127,6 +127,8 @@ type DesignLabPanel = 'actions' | 'players' | 'updates';
 
 type DesignLabDensity = 'comfortable' | 'compact';
 
+type TryoutSetupPhase = 'groups' | 'placement' | 'teams' | 'sessions';
+
 type DesignLabProfileField =
   | 'firstName'
   | 'lastName'
@@ -333,6 +335,16 @@ const TRYOUT_GENDERS: TryoutGender[] = [
   'Female',
   'Non-binary',
   'Prefer not to say',
+];
+
+const TRYOUT_SETUP_PHASES: Array<{
+  id: TryoutSetupPhase;
+  label: string;
+}> = [
+  { id: 'groups', label: 'Groups' },
+  { id: 'placement', label: 'Placement' },
+  { id: 'teams', label: 'Teams' },
+  { id: 'sessions', label: 'Sessions' },
 ];
 
 const TRYOUT_TEAM_COLOR_PRESETS = [
@@ -6739,10 +6751,16 @@ function TryoutSetupCard({
   onStartEvaluation,
   onStartPlayerDrag,
 }: TryoutSetupCardProps) {
+  const [activePhase, setActivePhase] = useState<TryoutSetupPhase>('groups');
+  const [selectedTeamGroupIdState, setSelectedTeamGroupIdState] = useState<string | null>(
+    null,
+  );
+  const [selectedSessionIdState, setSelectedSessionIdState] = useState<string | null>(null);
   const groups = draft?.groups ?? [];
   const teams = draft?.teams ?? [];
   const sessions = draft?.sessions ?? [];
   const teamMap = new Map(teams.map((team) => [team.id, team]));
+  const sourceSeason = draft ? seasons.find((season) => season.id === draft.id) ?? null : null;
   const birthYearRangeLabel =
     birthYearOptions.length > 0
       ? `${birthYearOptions[0]} to ${
@@ -6750,8 +6768,107 @@ function TryoutSetupCard({
         }`
       : 'No birth years configured yet.';
   const unassignedPlayers = draft
-    ? draft.players.filter((player) => player.effectiveGroupId === null)
+    ? [...draft.players.filter((player) => player.effectiveGroupId === null)].sort(
+        compareTryoutPlayerSummaries,
+      )
     : [];
+  const hasUnsavedChanges =
+    draft && sourceSeason
+      ? JSON.stringify({
+          name: draft.name,
+          groups: draft.groups,
+          teams: draft.teams,
+          sessions: draft.sessions,
+          playerOverrides: draft.playerOverrides,
+        }) !==
+        JSON.stringify({
+          name: sourceSeason.name,
+          groups: sourceSeason.groups,
+          teams: sourceSeason.teams,
+          sessions: sourceSeason.sessions,
+          playerOverrides: sourceSeason.playerOverrides,
+        })
+      : false;
+  const selectedTeamGroupId = groups.some((group) => group.id === selectedTeamGroupIdState)
+    ? selectedTeamGroupIdState
+    : groups[0]?.id ?? null;
+  const selectedTeamGroup = selectedTeamGroupId
+    ? groups.find((group) => group.id === selectedTeamGroupId) ?? null
+    : null;
+  const selectedSessionId = sessions.some((session) => session.id === selectedSessionIdState)
+    ? selectedSessionIdState
+    : sessions[0]?.id ?? null;
+  const selectedSession = selectedSessionId
+    ? sessions.find((session) => session.id === selectedSessionId) ?? null
+    : null;
+  const selectedSessionTemplate =
+    selectedSession?.evaluationTemplateId
+      ? evaluationTemplates.find(
+          (template) => template.id === selectedSession.evaluationTemplateId,
+        ) ?? null
+      : null;
+  const selectedSessionTeams = selectedSession
+    ? teams.filter((team) => selectedSession.teamIds.includes(team.id))
+    : [];
+  const readySessionCount = sessions.filter((session) => {
+    const sessionTeams = teams.filter((team) => session.teamIds.includes(team.id));
+    return Boolean(session.evaluationTemplateId) && sessionTeams.length > 0;
+  }).length;
+  const saveActionId = draft ? `save-tryout-season-${draft.id}` : '';
+  const downloadActionId = draft ? `download-tryout-season-report-${draft.id}` : '';
+  const deleteActionId = draft ? `delete-tryout-season-${draft.id}` : '';
+  const canLaunchSelectedSession =
+    selectedSession !== null &&
+    Boolean(selectedSession.evaluationTemplateId) &&
+    selectedSessionTeams.length > 0 &&
+    !hasUnsavedChanges;
+  const launchStatusLabel =
+    selectedSession === null
+      ? 'Create a session to launch evaluation'
+      : hasUnsavedChanges
+        ? 'Save changes to launch'
+        : !selectedSession.evaluationTemplateId
+          ? 'Choose a template'
+          : selectedSessionTeams.length === 0
+            ? 'Attach at least one team'
+            : 'Ready to launch';
+  const phaseCounts: Record<TryoutSetupPhase, number> = {
+    groups: groups.length,
+    placement: draft?.players.length ?? 0,
+    teams: teams.length,
+    sessions: sessions.length,
+  };
+
+  function getGroupPlayers(groupId: string): TryoutPlayerSummary[] {
+    if (!draft) return [];
+    return [...draft.players.filter((player) => player.effectiveGroupId === groupId)].sort(
+      compareTryoutPlayerSummaries,
+    );
+  }
+
+  function getGroupTeams(groupId: string): TryoutSeason['teams'] {
+    return teams.filter((team) => team.groupId === groupId);
+  }
+
+  function getEligiblePlayerCount(groupId: string): number {
+    if (!draft) return 0;
+    return draft.players.filter((player) => player.eligibleGroupIds.includes(groupId)).length;
+  }
+
+  function getSessionTeams(session: TryoutSeason['sessions'][number]): TryoutSeason['teams'] {
+    return teams.filter((team) => session.teamIds.includes(team.id));
+  }
+
+  function isSessionReady(session: TryoutSeason['sessions'][number]): boolean {
+    return Boolean(session.evaluationTemplateId) && getSessionTeams(session).length > 0;
+  }
+
+  function getSessionStatusLabel(session: TryoutSeason['sessions'][number]): string {
+    if (hasUnsavedChanges && selectedSession?.id === session.id) return 'Save changes first';
+    if (!session.evaluationTemplateId) return 'Template needed';
+    if (getSessionTeams(session).length === 0) return 'Teams needed';
+    return 'Ready';
+  }
 
   function handleAssignmentChange(
     playerId: string,
@@ -6882,31 +6999,26 @@ function TryoutSetupCard({
   }
 
   return (
-    <article className="card">
+    <article className="card tryout-setup-card">
       <div className="card-header">
         <div>
           <p className="section-eyebrow">Tryout Setup</p>
           <h2>Build the tryout plan</h2>
-          <p className="section-copy">
-            Create a season, define groups, place players, split teams, and
-            attach those teams to evaluation sessions. This structure becomes
-            the source of truth for the future on-ice evaluation workflow.
-          </p>
         </div>
         <span className="status-chip">{roleLabel}</span>
       </div>
 
-      <div className="form-section">
+      <section className="form-section tryout-season-shell">
         <div className="tryout-toolbar">
           <label className="field tryout-toolbar__field">
-            <span>New tryout season</span>
+            <span>New season</span>
             <input
               type="text"
               value={newSeasonName}
               onChange={(event) => {
                 onNewSeasonNameChange(event.target.value);
               }}
-              placeholder="Example: 2026-27 Tier II Tryouts"
+              placeholder="2026-27 Tier II Tryouts"
             />
           </label>
           <button
@@ -6915,27 +7027,19 @@ function TryoutSetupCard({
             onClick={onCreateSeason}
             disabled={busyAction === 'create-tryout-season'}
           >
-            {busyAction === 'create-tryout-season'
-              ? 'Creating season...'
-              : 'Create season'}
+            {busyAction === 'create-tryout-season' ? 'Creating season...' : 'Create season'}
           </button>
         </div>
-      </div>
 
-      <div className="form-section">
-        <h3>Tryout seasons</h3>
         {loading && !loaded ? (
           <div className="empty-state-card">
             <strong>Loading tryout seasons</strong>
-            <p>Pulling the current tryout setup library from the portal.</p>
+            <p>Pulling the current setup library.</p>
           </div>
         ) : seasons.length === 0 ? (
           <div className="empty-state-card">
-            <strong>No tryout season yet</strong>
-            <p>
-              Create the first season above to start organizing groups, teams,
-              and sessions.
-            </p>
+            <strong>No season yet</strong>
+            <p>Create the first season to start organizing groups, teams, and sessions.</p>
           </div>
         ) : (
           <div className="tryout-season-list">
@@ -6953,8 +7057,8 @@ function TryoutSetupCard({
                 <div className="template-list-item__content">
                   <strong>{season.name}</strong>
                   <p>
-                    {season.groups.length} groups, {season.teams.length} teams,{' '}
-                    {season.sessions.length} sessions
+                    {season.groups.length} groups, {season.teams.length} teams, {season.sessions.length}{' '}
+                    sessions
                   </p>
                 </div>
                 <span className="status-chip">{formatTimestamp(season.updatedAt)}</span>
@@ -6962,110 +7066,191 @@ function TryoutSetupCard({
             ))}
           </div>
         )}
-      </div>
+      </section>
 
       {draft ? (
-        <>
-          <div className="form-section">
-            <div className="card-header card-header--compact">
-              <div>
-                <h3>Season details</h3>
-                <p className="helper-copy">
-                  Freeform season naming is fine here. You can keep editing this
-                  structure as players move between groups and teams.
-                </p>
-              </div>
-              <div className="action-row">
-                <IconLabelActionButton
-                  label={
-                    busyAction === `download-tryout-season-report-${draft.id}`
-                      ? 'Building report...'
-                      : 'Download report'
-                  }
-                  icon="save"
-                  onClick={onDownloadReport}
-                  disabled={busyAction === `download-tryout-season-report-${draft.id}`}
+        <div className="tryout-workspace">
+          <section className="tryout-workspace-bar">
+            <div className="tryout-workspace-bar__main">
+              <label className="field">
+                <span>Season name</span>
+                <input
+                  type="text"
+                  value={draft.name}
+                  onChange={(event) => {
+                    onSeasonNameChange(event.target.value);
+                  }}
                 />
-                <IconLabelActionButton
-                  label={
-                    busyAction === `delete-tryout-season-${draft.id}`
-                      ? 'Deleting season...'
-                      : 'Delete season'
-                  }
-                  icon="delete"
-                  onClick={onDeleteSeason}
-                  disabled={busyAction === `delete-tryout-season-${draft.id}`}
-                />
-                <IconLabelActionButton
-                  label={
-                    busyAction === `save-tryout-season-${draft.id}`
-                      ? 'Saving tryout...'
-                      : 'Save tryout'
-                  }
-                  icon="save"
-                  onClick={onSaveSeason}
-                  disabled={busyAction === `save-tryout-season-${draft.id}`}
-                />
+              </label>
+
+              <div className="tryout-workspace-bar__meta">
+                <span
+                  className={`status-chip ${hasUnsavedChanges ? 'status-chip--warning' : ''}`}
+                >
+                  {busyAction === saveActionId
+                    ? 'Saving...'
+                    : hasUnsavedChanges
+                      ? 'Unsaved changes'
+                      : `Saved ${formatTimestamp(draft.updatedAt)}`}
+                </span>
+                <span className="status-chip">{draft.players.length} players</span>
+                <span className="status-chip">{groups.length} groups</span>
+                <span className="status-chip">{teams.length} teams</span>
+                <span className="status-chip">
+                  {readySessionCount}/{sessions.length} ready
+                </span>
               </div>
             </div>
 
-            <label className="field">
-              <span>Season name</span>
-              <input
-                type="text"
-                value={draft.name}
-                onChange={(event) => {
-                  onSeasonNameChange(event.target.value);
+            <div className="tryout-workspace-bar__launch">
+              <div className="tryout-workspace-bar__launch-header">
+                <h3>Launch evaluation</h3>
+                <span
+                  className={`status-chip ${
+                    canLaunchSelectedSession ? '' : 'status-chip--warning'
+                  }`}
+                >
+                  {launchStatusLabel}
+                </span>
+              </div>
+              <div className="tryout-launch-row">
+                <label className="field">
+                  <span>Session</span>
+                  <select
+                    value={selectedSessionId ?? ''}
+                    onChange={(event) => {
+                      setSelectedSessionIdState(event.target.value || null);
+                      setActivePhase('sessions');
+                    }}
+                    disabled={sessions.length === 0}
+                  >
+                    <option value="">Select session</option>
+                    {sessions.map((session) => (
+                      <option key={session.id} value={session.id}>
+                        {session.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={() => {
+                    if (!selectedSession) return;
+                    onStartEvaluation(selectedSession.id);
+                  }}
+                  disabled={!canLaunchSelectedSession}
+                >
+                  Start evaluation
+                </button>
+              </div>
+              {selectedSession ? (
+                <div className="tryout-inline-chips">
+                  <span className="status-chip">
+                    {selectedSessionTeams.length} team
+                    {selectedSessionTeams.length === 1 ? '' : 's'}
+                  </span>
+                  <span className="status-chip">
+                    {selectedSessionTemplate?.name ?? 'No template'}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="tryout-workspace-bar__actions">
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={onDownloadReport}
+                disabled={busyAction === downloadActionId}
+              >
+                {busyAction === downloadActionId ? 'Building report...' : 'Download report'}
+              </button>
+              <button
+                className="ghost-button tryout-danger-button"
+                type="button"
+                onClick={onDeleteSeason}
+                disabled={busyAction === deleteActionId}
+              >
+                {busyAction === deleteActionId ? 'Deleting season...' : 'Delete season'}
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={onSaveSeason}
+                disabled={busyAction === saveActionId}
+              >
+                {busyAction === saveActionId ? 'Saving changes...' : 'Save changes'}
+              </button>
+            </div>
+          </section>
+
+          <nav className="tryout-phase-nav" aria-label="Tryout setup phases">
+            {TRYOUT_SETUP_PHASES.map((phase) => (
+              <button
+                key={phase.id}
+                className={`tryout-phase-nav__button ${
+                  activePhase === phase.id ? 'tryout-phase-nav__button--active' : ''
+                }`}
+                type="button"
+                onClick={() => {
+                  setActivePhase(phase.id);
                 }}
-              />
-            </label>
-          </div>
+              >
+                <span>{phase.label}</span>
+                <span className="tryout-phase-nav__count">{phaseCounts[phase.id]}</span>
+              </button>
+            ))}
+          </nav>
 
-          <div className="form-section">
-            <div className="team-history-header">
-              <div>
-                <h3>Tryout groups</h3>
-                <p className="helper-copy">
-                  Create the group names you actually use, then define which
-                  birth years and genders belong in each one.
-                </p>
+          {activePhase === 'groups' ? (
+            <section className="form-section tryout-phase-panel">
+              <div className="tryout-phase-panel__header">
+                <div>
+                  <h3>Groups</h3>
+                  <div className="tryout-inline-chips">
+                    <span className="status-chip">Birth years {birthYearRangeLabel}</span>
+                  </div>
+                </div>
+                <button className="secondary-button" type="button" onClick={onAddGroup}>
+                  Add group
+                </button>
               </div>
-              <IconLabelActionButton label="Add group" icon="add" onClick={onAddGroup} />
-            </div>
 
-            <div className="tryout-group-list">
               {groups.length === 0 ? (
                 <div className="empty-state-card">
-                  <strong>No groups defined yet</strong>
-                  <p>
-                    Add your first group to start auto-sorting players into the
-                    right tryout bucket.
-                  </p>
+                  <strong>No groups yet</strong>
+                  <p>Add a group to start sorting players.</p>
                 </div>
               ) : (
-                groups.map((group) => (
-                  <div key={group.id} className="criterion-card">
-                    <div className="criterion-card__header">
-                      <div>
-                        <h3>{group.name}</h3>
-                        <p className="helper-copy">
-                          {draft.players.filter((player) =>
-                            player.eligibleGroupIds.includes(group.id),
-                          ).length}{' '}
-                          players match this group by age/gender rules.
-                        </p>
+                <div className="tryout-group-grid">
+                  {groups.map((group) => (
+                    <div key={group.id} className="criterion-card tryout-group-card">
+                      <div className="criterion-card__header">
+                        <div>
+                          <h3>{group.name || 'Untitled group'}</h3>
+                          <div className="tryout-inline-chips">
+                            <span className="status-chip">
+                              {getEligiblePlayerCount(group.id)} eligible
+                            </span>
+                            <span className="status-chip">
+                              {getGroupPlayers(group.id).length} placed
+                            </span>
+                            <span className="status-chip">
+                              {getGroupTeams(group.id).length} teams
+                            </span>
+                          </div>
+                        </div>
+                        <IconActionButton
+                          label="Remove group"
+                          icon="delete"
+                          danger
+                          onClick={() => {
+                            onRemoveGroup(group.id);
+                          }}
+                        />
                       </div>
-                      <IconActionButton
-                        label="Remove group"
-                        icon="delete"
-                        danger
-                        onClick={() => {
-                          onRemoveGroup(group.id);
-                        }}
-                      />
-                    </div>
 
-                    <div className="field-grid">
                       <label className="field">
                         <span>Group name</span>
                         <input
@@ -7076,77 +7261,91 @@ function TryoutSetupCard({
                           }}
                         />
                       </label>
-                    </div>
 
-                    <div className="form-section">
-                      <h3>Allowed birth years</h3>
-                      <p className="helper-copy">
-                        Club settings currently allow {birthYearRangeLabel}.
-                      </p>
-                      <div className="chip-list">
-                        {birthYearOptions.map((birthYear) => (
-                          <label key={`${group.id}-${birthYear}`} className="chip-option">
-                            <input
-                              type="checkbox"
-                              checked={group.allowedBirthYears.includes(birthYear)}
-                              onChange={(event) => {
-                                onToggleGroupBirthYear(
-                                  group.id,
-                                  birthYear,
-                                  event.target.checked,
-                                );
-                              }}
-                            />
-                            <span>{birthYear}</span>
-                          </label>
-                        ))}
+                      <div className="tryout-rule-grid">
+                        <section className="tryout-rule-panel">
+                          <div className="tryout-rule-panel__header">
+                            <h4>Birth years</h4>
+                            <span className="status-chip">
+                              {group.allowedBirthYears.length} selected
+                            </span>
+                          </div>
+                          <div className="chip-list">
+                            {birthYearOptions.map((birthYear) => (
+                              <label key={`${group.id}-${birthYear}`} className="chip-option">
+                                <input
+                                  type="checkbox"
+                                  checked={group.allowedBirthYears.includes(birthYear)}
+                                  onChange={(event) => {
+                                    onToggleGroupBirthYear(
+                                      group.id,
+                                      birthYear,
+                                      event.target.checked,
+                                    );
+                                  }}
+                                />
+                                <span>{birthYear}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </section>
+
+                        <section className="tryout-rule-panel">
+                          <div className="tryout-rule-panel__header">
+                            <h4>Genders</h4>
+                            <span className="status-chip">
+                              {group.allowedGenders.length} selected
+                            </span>
+                          </div>
+                          <div className="chip-list">
+                            {TRYOUT_GENDERS.map((gender) => (
+                              <label key={`${group.id}-${gender}`} className="chip-option">
+                                <input
+                                  type="checkbox"
+                                  checked={group.allowedGenders.includes(gender)}
+                                  onChange={(event) => {
+                                    onToggleGroupGender(
+                                      group.id,
+                                      gender,
+                                      event.target.checked,
+                                    );
+                                  }}
+                                />
+                                <span>{gender}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </section>
                       </div>
                     </div>
-
-                    <div className="form-section">
-                      <h3>Allowed genders</h3>
-                      <div className="chip-list">
-                        {TRYOUT_GENDERS.map((gender) => (
-                          <label key={`${group.id}-${gender}`} className="chip-option">
-                            <input
-                              type="checkbox"
-                              checked={group.allowedGenders.includes(gender)}
-                              onChange={(event) => {
-                                onToggleGroupGender(
-                                  group.id,
-                                  gender,
-                                  event.target.checked,
-                                );
-                              }}
-                            />
-                            <span>{gender}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ))
+                  ))}
+                </div>
               )}
-            </div>
-          </div>
+            </section>
+          ) : null}
 
-          <div className="form-section">
-            <h3>Player placement</h3>
-            <p className="helper-copy">
-              Players default into a group only when they match exactly one
-              group. Everyone else lands in the Unassigned Pool until a coach
-              chooses an override.
-            </p>
+          {activePhase === 'placement' ? (
+            <section className="form-section tryout-phase-panel">
+              <div className="tryout-phase-panel__header">
+                <div>
+                  <h3>Placement</h3>
+                  <div className="tryout-inline-chips">
+                    <span
+                      className={`status-chip ${
+                        unassignedPlayers.length > 0 ? 'status-chip--warning' : ''
+                      }`}
+                    >
+                      {unassignedPlayers.length} unassigned
+                    </span>
+                  </div>
+                </div>
+              </div>
 
-            <div className="tryout-roster-list">
-              <div className="criterion-card">
+              <div className="tryout-placement-grid">
+                <div className="criterion-card tryout-placement-panel">
                 <div className="criterion-card__header">
                   <div>
                     <h3>Unassigned Pool</h3>
-                    <p className="helper-copy">
-                      Players without a single automatic placement or players
-                      manually moved out of a group.
-                    </p>
                   </div>
                   <span className="status-chip">{unassignedPlayers.length}</span>
                 </div>
@@ -7155,31 +7354,26 @@ function TryoutSetupCard({
                   {unassignedPlayers.length === 0 ? (
                     <div className="stack-card">
                       <div>
-                        <strong>No players are currently unassigned</strong>
-                        <p>Everyone is either auto-placed or manually assigned.</p>
+                        <strong>No players waiting for placement</strong>
                       </div>
                     </div>
                   ) : (
                     unassignedPlayers.map(renderAssignmentPlayerCard)
                   )}
                 </div>
-              </div>
+                </div>
 
               {groups.map((group) => {
-                const groupPlayers = draft.players.filter(
-                  (player) => player.effectiveGroupId === group.id,
-                );
+                const groupPlayers = getGroupPlayers(group.id);
 
                 return (
-                  <div key={`placement-${group.id}`} className="criterion-card">
+                  <div
+                    key={`placement-${group.id}`}
+                    className="criterion-card tryout-placement-panel"
+                  >
                     <div className="criterion-card__header">
                       <div>
                         <h3>{group.name}</h3>
-                        <p className="helper-copy">
-                          {group.allowedBirthYears.join(', ') || 'No birth years selected'}{' '}
-                          •{' '}
-                          {group.allowedGenders.join(', ') || 'No genders selected'}
-                        </p>
                       </div>
                       <span className="status-chip">{groupPlayers.length}</span>
                     </div>
@@ -7188,11 +7382,7 @@ function TryoutSetupCard({
                       {groupPlayers.length === 0 ? (
                         <div className="stack-card">
                           <div>
-                            <strong>No players in this group yet</strong>
-                            <p>
-                              Players will appear here when they qualify
-                              automatically or are moved here manually.
-                            </p>
+                            <strong>No players in this group</strong>
                           </div>
                         </div>
                       ) : (
@@ -7202,54 +7392,87 @@ function TryoutSetupCard({
                   </div>
                 );
               })}
-            </div>
-          </div>
+              </div>
+            </section>
+          ) : null}
 
-          <div className="form-section">
-            <h3>Tryout teams</h3>
-            <p className="helper-copy">
-              Create teams inside each group, then drag players between team
-              cards or use the team selector for mobile and bulk jersey entry.
-            </p>
-
-            <div className="tryout-team-section-list">
+          {activePhase === 'teams' ? (
+            <section className="form-section tryout-phase-panel tryout-phase-panel--flush">
               {groups.length === 0 ? (
                 <div className="empty-state-card">
-                  <strong>No groups available yet</strong>
-                  <p>
-                    Define at least one tryout group before building teams
-                    inside it.
-                  </p>
+                  <strong>No groups available</strong>
+                  <p>Add a group before building teams.</p>
                 </div>
               ) : (
-                groups.map((group) => {
-                  const groupTeams = teams.filter((team) => team.groupId === group.id);
-                  const groupPlayers = draft.players.filter(
-                    (player) => player.effectiveGroupId === group.id,
-                  );
-                  const unteamedPlayers = groupPlayers.filter((player) => !player.teamId);
+                <div className="tryout-team-workspace">
+                  <aside className="tryout-group-rail">
+                    <div className="tryout-phase-panel__header tryout-phase-panel__header--compact">
+                      <div>
+                        <h3>Groups</h3>
+                      </div>
+                    </div>
 
-                  return (
-                    <div key={`teams-${group.id}`} className="criterion-card">
-                      <div className="criterion-card__header">
+                    <div className="tryout-group-rail__list">
+                      {groups.map((group) => {
+                        const groupPlayers = getGroupPlayers(group.id);
+                        const groupTeams = getGroupTeams(group.id);
+                        const openCount = groupPlayers.filter((player) => !player.teamId).length;
+
+                        return (
+                          <button
+                            key={group.id}
+                            className={`tryout-group-selector ${
+                              selectedTeamGroupId === group.id ? 'tryout-group-selector--active' : ''
+                            }`}
+                            type="button"
+                            onClick={() => {
+                              setSelectedTeamGroupIdState(group.id);
+                            }}
+                          >
+                            <strong>{group.name}</strong>
+                            <div className="tryout-group-selector__meta">
+                              <span>{groupPlayers.length} players</span>
+                              <span>{groupTeams.length} teams</span>
+                              <span>{openCount} open</span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </aside>
+
+                  {selectedTeamGroup ? (
+                    <div className="tryout-team-workspace__main">
+                      <div className="tryout-phase-panel__header">
                         <div>
-                          <h3>{group.name}</h3>
-                          <p className="helper-copy">
-                            {groupPlayers.length} players currently sit in this group.
-                          </p>
+                          <h3>{selectedTeamGroup.name}</h3>
+                          <div className="tryout-inline-chips">
+                            <span className="status-chip">
+                              {getGroupPlayers(selectedTeamGroup.id).length} players
+                            </span>
+                            <span className="status-chip">
+                              {
+                                getGroupPlayers(selectedTeamGroup.id).filter((player) => !player.teamId)
+                                  .length
+                              }{' '}
+                              unassigned
+                            </span>
+                          </div>
                         </div>
-                        <IconLabelActionButton
-                          label="Add team"
-                          icon="add"
+                        <button
+                          className="secondary-button"
+                          type="button"
                           onClick={() => {
-                            onAddTeam(group.id);
+                            onAddTeam(selectedTeamGroup.id);
                           }}
-                        />
+                        >
+                          Add team
+                        </button>
                       </div>
 
-                      <div className="tryout-team-board">
-                        <div
-                          className="tryout-team-column"
+                      <div className="tryout-team-workspace__content">
+                        <section
+                          className="tryout-team-column tryout-team-column--pool"
                           onDragOver={(event) => {
                             event.preventDefault();
                           }}
@@ -7259,278 +7482,357 @@ function TryoutSetupCard({
                         >
                           <div className="tryout-team-column__header">
                             <strong>Available players</strong>
-                            <span>{unteamedPlayers.length}</span>
+                            <span>
+                              {
+                                getGroupPlayers(selectedTeamGroup.id).filter((player) => !player.teamId)
+                                  .length
+                              }
+                            </span>
                           </div>
                           <div className="stack-list">
-                            {unteamedPlayers.length === 0 ? (
+                            {getGroupPlayers(selectedTeamGroup.id).filter((player) => !player.teamId)
+                              .length === 0 ? (
                               <div className="stack-card">
                                 <div>
-                                  <strong>No players waiting for a team</strong>
-                                  <p>Drag a player here to clear their team assignment.</p>
+                                  <strong>Every player is on a team</strong>
                                 </div>
                               </div>
                             ) : (
-                              unteamedPlayers.map((player) =>
-                                renderTeamPlayerCard(player, groupTeams),
-                              )
+                              getGroupPlayers(selectedTeamGroup.id)
+                                .filter((player) => !player.teamId)
+                                .map((player) =>
+                                  renderTeamPlayerCard(player, getGroupTeams(selectedTeamGroup.id)),
+                                )
                             )}
                           </div>
-                        </div>
+                        </section>
 
-                        {groupTeams.map((team) => {
-                          const roster = groupPlayers.filter(
-                            (player) => player.teamId === team.id,
-                          );
-                          const teamColor = normalizeHexColor(
-                            team.jerseyColor,
-                            getDefaultTryoutTeamColor(team.name, groupTeams.indexOf(team)),
-                          );
+                        <div className="tryout-team-board">
+                          {getGroupTeams(selectedTeamGroup.id).length === 0 ? (
+                            <div className="empty-state-card">
+                              <strong>No teams in this group yet</strong>
+                              <p>Add a team to start building the on-ice split.</p>
+                            </div>
+                          ) : (
+                            getGroupTeams(selectedTeamGroup.id).map((team, teamIndex) => {
+                              const roster = getGroupPlayers(selectedTeamGroup.id).filter(
+                                (player) => player.teamId === team.id,
+                              );
+                              const teamColor = normalizeHexColor(
+                                team.jerseyColor,
+                                getDefaultTryoutTeamColor(team.name, teamIndex),
+                              );
 
-                          return (
-                            <div
-                              key={team.id}
-                              className="tryout-team-column tryout-team-column--team"
-                              style={buildTryoutTeamColumnStyle(teamColor)}
-                              onDragOver={(event) => {
-                                event.preventDefault();
-                              }}
-                              onDrop={() => {
-                                handlePlayerDrop(team.id);
-                              }}
-                            >
-                              <div className="tryout-team-column__header">
-                                <div className="field">
-                                  <span>Team name</span>
-                                  <input
-                                    type="text"
-                                    value={team.name}
-                                    onChange={(event) => {
-                                      onUpdateTeamName(team.id, event.target.value);
-                                    }}
-                                  />
-                                </div>
-                                <IconActionButton
-                                  label="Remove team"
-                                  icon="delete"
-                                  danger
-                                  onClick={() => {
-                                    onRemoveTeam(team.id);
+                              return (
+                                <div
+                                  key={team.id}
+                                  className="tryout-team-column tryout-team-column--team"
+                                  style={buildTryoutTeamColumnStyle(teamColor)}
+                                  onDragOver={(event) => {
+                                    event.preventDefault();
                                   }}
-                                />
-                              </div>
-
-                              <div className="tryout-team-column__meta">
-                                <div className="tryout-team-column__color-row">
-                                  <label className="field tryout-team-color-field">
-                                    <span>Jersey color</span>
-                                    <input
-                                      type="color"
-                                      value={teamColor}
-                                      onChange={(event) => {
-                                        onUpdateTeamColor(team.id, event.target.value);
-                                      }}
-                                      aria-label={`Choose jersey color for ${team.name}`}
-                                    />
-                                  </label>
-                                  <div className="tryout-team-color-presets">
-                                    {TRYOUT_TEAM_COLOR_PRESETS.map((preset) => (
-                                      <button
-                                        key={`${team.id}-${preset.value}`}
-                                        className="team-color-preset"
-                                        type="button"
-                                        style={buildTeamColorPresetStyle(
-                                          preset.value,
-                                          teamColor === preset.value,
-                                        )}
-                                        aria-label={`${preset.label} jersey color`}
-                                        aria-pressed={teamColor === preset.value}
-                                        title={preset.label}
-                                        onClick={() => {
-                                          onUpdateTeamColor(team.id, preset.value);
+                                  onDrop={() => {
+                                    handlePlayerDrop(team.id);
+                                  }}
+                                >
+                                  <div className="tryout-team-column__header">
+                                    <label className="field">
+                                      <span>Team name</span>
+                                      <input
+                                        type="text"
+                                        value={team.name}
+                                        onChange={(event) => {
+                                          onUpdateTeamName(team.id, event.target.value);
                                         }}
                                       />
-                                    ))}
-                                  </div>
-                                </div>
-
-                                <div className="tryout-team-column__summary">
-                                  <span
-                                    className="status-chip"
-                                    style={buildSoftTeamChipStyle(teamColor)}
-                                  >
-                                    <span
-                                      className="team-color-dot"
-                                      style={buildTeamDotStyle(teamColor)}
-                                      aria-hidden="true"
+                                    </label>
+                                    <IconActionButton
+                                      label="Remove team"
+                                      icon="delete"
+                                      danger
+                                      onClick={() => {
+                                        onRemoveTeam(team.id);
+                                      }}
                                     />
-                                    {formatTryoutTeamColorLabel(teamColor)}
-                                  </span>
-                                  <span
-                                    className="status-chip"
-                                    style={buildSoftTeamChipStyle(teamColor)}
-                                  >
-                                    {roster.length} player{roster.length === 1 ? '' : 's'}
-                                  </span>
-                                </div>
-                              </div>
+                                  </div>
 
-                              <div className="stack-list">
-                                {roster.length === 0 ? (
-                                  <div className="stack-card">
-                                    <div>
-                                      <strong>No players on this team yet</strong>
-                                      <p>Drop players here or choose this team from the selector.</p>
+                                  <div className="tryout-team-column__meta">
+                                    <div className="tryout-team-column__color-row">
+                                      <label className="field tryout-team-color-field">
+                                        <span>Jersey color</span>
+                                        <input
+                                          type="color"
+                                          value={teamColor}
+                                          onChange={(event) => {
+                                            onUpdateTeamColor(team.id, event.target.value);
+                                          }}
+                                          aria-label={`Choose jersey color for ${team.name}`}
+                                        />
+                                      </label>
+                                      <div className="tryout-team-color-presets">
+                                        {TRYOUT_TEAM_COLOR_PRESETS.map((preset) => (
+                                          <button
+                                            key={`${team.id}-${preset.value}`}
+                                            className="team-color-preset"
+                                            type="button"
+                                            style={buildTeamColorPresetStyle(
+                                              preset.value,
+                                              teamColor === preset.value,
+                                            )}
+                                            aria-label={`${preset.label} jersey color`}
+                                            aria-pressed={teamColor === preset.value}
+                                            title={preset.label}
+                                            onClick={() => {
+                                              onUpdateTeamColor(team.id, preset.value);
+                                            }}
+                                          />
+                                        ))}
+                                      </div>
+                                    </div>
+
+                                    <div className="tryout-team-column__summary">
+                                      <span
+                                        className="status-chip"
+                                        style={buildSoftTeamChipStyle(teamColor)}
+                                      >
+                                        <span
+                                          className="team-color-dot"
+                                          style={buildTeamDotStyle(teamColor)}
+                                          aria-hidden="true"
+                                        />
+                                        {formatTryoutTeamColorLabel(teamColor)}
+                                      </span>
+                                      <span
+                                        className="status-chip"
+                                        style={buildSoftTeamChipStyle(teamColor)}
+                                      >
+                                        {roster.length} player{roster.length === 1 ? '' : 's'}
+                                      </span>
                                     </div>
                                   </div>
-                                ) : (
-                                  roster.map((player) =>
-                                    renderTeamPlayerCard(player, groupTeams),
-                                  )
-                                )}
+
+                                  <div className="stack-list">
+                                    {roster.length === 0 ? (
+                                      <div className="stack-card">
+                                        <div>
+                                          <strong>No players on this team yet</strong>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      roster.map((player) =>
+                                        renderTeamPlayerCard(
+                                          player,
+                                          getGroupTeams(selectedTeamGroup.id),
+                                        ),
+                                      )
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </section>
+          ) : null}
+
+          {activePhase === 'sessions' ? (
+            <section className="form-section tryout-phase-panel tryout-phase-panel--flush">
+              <div className="tryout-session-workspace">
+                <aside className="tryout-session-sidebar">
+                  <div className="tryout-phase-panel__header">
+                    <div>
+                      <h3>Sessions</h3>
+                    </div>
+                    <button className="secondary-button" type="button" onClick={onAddSession}>
+                      Add session
+                    </button>
+                  </div>
+
+                  {sessions.length === 0 ? (
+                    <div className="empty-state-card">
+                      <strong>No sessions yet</strong>
+                      <p>Add a session to connect teams and launch evaluation.</p>
+                    </div>
+                  ) : (
+                    <div className="tryout-session-list">
+                      {sessions.map((session) => {
+                        const sessionTeams = getSessionTeams(session);
+                        const template =
+                          session.evaluationTemplateId
+                            ? evaluationTemplates.find(
+                                (evaluationTemplate) =>
+                                  evaluationTemplate.id === session.evaluationTemplateId,
+                              ) ?? null
+                            : null;
+
+                        return (
+                          <button
+                            key={session.id}
+                            className={`tryout-session-list-item ${
+                              selectedSessionId === session.id
+                                ? 'tryout-session-list-item--active'
+                                : ''
+                            }`}
+                            type="button"
+                            onClick={() => {
+                              setSelectedSessionIdState(session.id);
+                            }}
+                          >
+                            <div className="tryout-session-list-item__header">
+                              <strong>{session.name || 'Untitled session'}</strong>
+                              <span
+                                className={`status-chip ${
+                                  isSessionReady(session) ? '' : 'status-chip--warning'
+                                }`}
+                              >
+                                {getSessionStatusLabel(session)}
+                              </span>
+                            </div>
+                            <div className="tryout-session-list-item__meta">
+                              <span>{sessionTeams.length} teams</span>
+                              <span>{template?.name ?? 'No template'}</span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </aside>
+
+                <div className="tryout-session-detail">
+                  {selectedSession ? (
+                    <div className="criterion-card tryout-session-detail-card">
+                      <div className="criterion-card__header">
+                        <label className="field tryout-session-name-field">
+                          <span>Session name</span>
+                          <input
+                            type="text"
+                            value={selectedSession.name}
+                            onChange={(event) => {
+                              onUpdateSessionName(selectedSession.id, event.target.value);
+                            }}
+                          />
+                        </label>
+                        <div className="tryout-session-detail__actions">
+                          <button
+                            className="primary-button"
+                            type="button"
+                            onClick={() => {
+                              onStartEvaluation(selectedSession.id);
+                            }}
+                            disabled={!canLaunchSelectedSession}
+                          >
+                            Start evaluation
+                          </button>
+                          <IconActionButton
+                            label="Remove session"
+                            icon="delete"
+                            danger
+                            onClick={() => {
+                              onRemoveSession(selectedSession.id);
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="tryout-inline-chips">
+                        <span
+                          className={`status-chip ${
+                            canLaunchSelectedSession ? '' : 'status-chip--warning'
+                          }`}
+                        >
+                          {launchStatusLabel}
+                        </span>
+                        <span className="status-chip">
+                          {selectedSessionTeams.length} team
+                          {selectedSessionTeams.length === 1 ? '' : 's'}
+                        </span>
+                        <span className="status-chip">
+                          {selectedSessionTemplate?.name ?? 'No template'}
+                        </span>
+                      </div>
+
+                      <div className="criterion-settings-grid">
+                        <label className="field">
+                          <span>Evaluation template</span>
+                          <select
+                            value={selectedSession.evaluationTemplateId ?? ''}
+                            onChange={(event) => {
+                              onUpdateSessionTemplate(
+                                selectedSession.id,
+                                event.target.value || null,
+                              );
+                            }}
+                          >
+                            <option value="">Select template</option>
+                            {evaluationTemplates.map((template) => (
+                              <option key={template.id} value={template.id}>
+                                {template.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+
+                      <div className="form-section">
+                        <h3>Teams</h3>
+                        <div className="chip-list">
+                          {teams.length === 0 ? (
+                            <div className="stack-card">
+                              <div>
+                                <strong>No teams available yet</strong>
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-
-          <div className="form-section">
-            <div className="team-history-header">
-              <div>
-                <h3>Evaluation sessions</h3>
-                <p className="helper-copy">
-                  Sessions stay freeform. Attach any number of tryout teams to
-                  each session so evaluators can load the right player set later.
-                </p>
-              </div>
-              <IconLabelActionButton
-                label="Add session"
-                icon="add"
-                onClick={onAddSession}
-              />
-            </div>
-
-            <div className="tryout-session-list">
-              {sessions.length === 0 ? (
-                <div className="empty-state-card">
-                  <strong>No sessions created yet</strong>
-                  <p>
-                    Add sessions after teams are built, or create them now and
-                    attach teams later.
-                  </p>
-                </div>
-              ) : (
-                sessions.map((session) => (
-                  <div key={session.id} className="criterion-card">
-                    <div className="criterion-card__header">
-                      <label className="field tryout-session-name-field">
-                        <span>Session name</span>
-                        <input
-                          type="text"
-                          value={session.name}
-                          onChange={(event) => {
-                            onUpdateSessionName(session.id, event.target.value);
-                          }}
-                        />
-                      </label>
-                      <IconActionButton
-                        label="Remove session"
-                        icon="delete"
-                        danger
-                        onClick={() => {
-                          onRemoveSession(session.id);
-                        }}
-                      />
-                    </div>
-
-                    <div className="criterion-settings-grid">
-                      <label className="field">
-                        <span>Evaluation template</span>
-                        <select
-                          value={session.evaluationTemplateId ?? ''}
-                          onChange={(event) => {
-                            onUpdateSessionTemplate(
-                              session.id,
-                              event.target.value || null,
-                            );
-                          }}
-                        >
-                          <option value="">Select template</option>
-                          {evaluationTemplates.map((template) => (
-                            <option key={template.id} value={template.id}>
-                              {template.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <div className="tryout-session-actions">
-                        <span className="status-chip">
-                          {session.teamIds.length} team{session.teamIds.length === 1 ? '' : 's'}
-                        </span>
-                        <IconLabelActionButton
-                          label="Start evaluation"
-                          icon="save"
-                          onClick={() => {
-                            onStartEvaluation(session.id);
-                          }}
-                          disabled={
-                            !session.evaluationTemplateId || session.teamIds.length === 0
-                          }
-                        />
-                      </div>
-                    </div>
-
-                    <div className="chip-list">
-                      {teams.length === 0 ? (
-                        <div className="stack-card">
-                          <div>
-                            <strong>No teams available yet</strong>
-                            <p>Create teams first, then attach them to sessions here.</p>
-                          </div>
+                          ) : (
+                            teams.map((team) => (
+                              <label key={`${selectedSession.id}-${team.id}`} className="chip-option">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedSession.teamIds.includes(team.id)}
+                                  onChange={(event) => {
+                                    onToggleSessionTeam(
+                                      selectedSession.id,
+                                      team.id,
+                                      event.target.checked,
+                                    );
+                                  }}
+                                />
+                                <span
+                                  className="tryout-team-session-chip"
+                                  style={buildTryoutSessionTeamChipStyle(
+                                    team.jerseyColor,
+                                    selectedSession.teamIds.includes(team.id),
+                                  )}
+                                >
+                                  <span
+                                    className="team-color-dot"
+                                    style={buildTeamDotStyle(team.jerseyColor)}
+                                    aria-hidden="true"
+                                  />
+                                  {team.name} ({getTryoutGroupLabel(team.groupId, groups)})
+                                </span>
+                              </label>
+                            ))
+                          )}
                         </div>
-                      ) : (
-                        teams.map((team) => (
-                          <label key={`${session.id}-${team.id}`} className="chip-option">
-                            <input
-                              type="checkbox"
-                              checked={session.teamIds.includes(team.id)}
-                              onChange={(event) => {
-                                onToggleSessionTeam(
-                                  session.id,
-                                  team.id,
-                                  event.target.checked,
-                                );
-                              }}
-                            />
-                            <span
-                              className="tryout-team-session-chip"
-                              style={buildTryoutSessionTeamChipStyle(
-                                team.jerseyColor,
-                                session.teamIds.includes(team.id),
-                              )}
-                            >
-                              <span
-                                className="team-color-dot"
-                                style={buildTeamDotStyle(team.jerseyColor)}
-                                aria-hidden="true"
-                              />
-                              {team.name} ({getTryoutGroupLabel(team.groupId, groups)})
-                            </span>
-                          </label>
-                        ))
-                      )}
+                      </div>
                     </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </>
+                  ) : (
+                    <div className="empty-state-card">
+                      <strong>Select a session</strong>
+                      <p>Pick a session on the left to edit or launch it.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
+          ) : null}
+        </div>
       ) : null}
     </article>
   );
