@@ -13,6 +13,8 @@ export const demoData: BootstrapData = {
     tryoutWindowLabel: 'May 1-3, 2026',
     tryoutWindowStart: '2026-05-01',
     tryoutWindowEnd: '2026-05-03',
+    tryoutBirthYearYoungest: '2017',
+    tryoutBirthYearOldest: '2008',
     intakeIntro:
       'Please complete the brief form below. Responses are intended to help staff understand what type of environment may best accelerate the player\'s growth, along with coaching and learning preferences and any practical considerations ahead of tryouts. There are no "right" answers, and responses do not determine placement. This is not a scored part of tryouts and does not replace on-ice evaluation. The goal is simply better information in service of better development.',
   },

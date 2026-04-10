@@ -36,6 +36,8 @@ const defaultOrganization = {
   tryoutWindowLabel: 'May 1-3, 2026',
   tryoutWindowStart: '2026-05-01',
   tryoutWindowEnd: '2026-05-03',
+  tryoutBirthYearYoungest: '2017',
+  tryoutBirthYearOldest: '2008',
   intakeIntro:
     'Please complete the brief form below. Responses are intended to help staff understand what type of environment may best accelerate the player\'s growth, along with coaching and learning preferences and any practical considerations ahead of tryouts. There are no "right" answers, and responses do not determine placement. This is not a scored part of tryouts and does not replace on-ice evaluation. The goal is simply better information in service of better development.',
 } as const;
@@ -73,6 +75,8 @@ type OrganizationOverview = {
   tryoutWindowLabel: string;
   tryoutWindowStart: string;
   tryoutWindowEnd: string;
+  tryoutBirthYearYoungest: string;
+  tryoutBirthYearOldest: string;
   intakeIntro: string;
 };
 
@@ -90,6 +94,8 @@ type OrganizationItem = {
   tryoutWindowLabel: string;
   tryoutWindowStart: string;
   tryoutWindowEnd: string;
+  tryoutBirthYearYoungest: string;
+  tryoutBirthYearOldest: string;
   intakeIntro: string;
   createdAt: string;
   updatedAt: string;
@@ -378,6 +384,8 @@ type OrganizationSettingsInput = {
   tryoutWindowLabel?: string;
   tryoutWindowStart?: string;
   tryoutWindowEnd?: string;
+  tryoutBirthYearYoungest?: string;
+  tryoutBirthYearOldest?: string;
   intakeIntro?: string;
 };
 
@@ -1112,11 +1120,20 @@ async function listTryoutSeasonsResponse(
   userId: string,
 ): Promise<SerializedTryoutSeason[]> {
   await assertCanManageTryouts(userId);
-  const seasons = await listTryoutSeasonItems();
+  const [organization, seasons] = await Promise.all([
+    getOrganizationOverview(),
+    listTryoutSeasonItems(),
+  ]);
   if (seasons.length === 0) return [];
 
+  const allowedTryoutBirthYears = buildTryoutBirthYearOptions(
+    organization.tryoutBirthYearYoungest,
+    organization.tryoutBirthYearOldest,
+  );
   const players = await scanAll<PlayerItem>('Player');
-  return seasons.map((season) => serializeTryoutSeason(season, players));
+  return seasons.map((season) =>
+    serializeTryoutSeason(season, players, allowedTryoutBirthYears),
+  );
 }
 
 async function createTryoutSeasonResponse(
@@ -1145,8 +1162,15 @@ async function createTryoutSeasonResponse(
   };
 
   await saveTryoutSeasonItem(seasonItem);
-  const players = await scanAll<PlayerItem>('Player');
-  return serializeTryoutSeason(seasonItem, players);
+  const [organization, players] = await Promise.all([
+    getOrganizationOverview(),
+    scanAll<PlayerItem>('Player'),
+  ]);
+  const allowedTryoutBirthYears = buildTryoutBirthYearOptions(
+    organization.tryoutBirthYearYoungest,
+    organization.tryoutBirthYearOldest,
+  );
+  return serializeTryoutSeason(seasonItem, players, allowedTryoutBirthYears);
 }
 
 async function updateTryoutSeasonResponse(
@@ -1159,7 +1183,16 @@ async function updateTryoutSeasonResponse(
   if (!existingSeason) throw notFound('Tryout season not found.');
 
   const payload = parseJsonBody<TryoutSeasonUpdateInput>(body);
-  const sanitizedGroups = sanitizeTryoutGroups(payload.groups, existingSeason.groups);
+  const organization = await getOrganizationOverview();
+  const allowedTryoutBirthYears = buildTryoutBirthYearOptions(
+    organization.tryoutBirthYearYoungest,
+    organization.tryoutBirthYearOldest,
+  );
+  const sanitizedGroups = sanitizeTryoutGroups(
+    payload.groups,
+    existingSeason.groups,
+    new Set(allowedTryoutBirthYears),
+  );
   const sanitizedTeams = sanitizeTryoutTeams(payload.teams, sanitizedGroups, existingSeason.teams);
   const sanitizedSessions = sanitizeTryoutSessions(
     payload.sessions,
@@ -1191,7 +1224,7 @@ async function updateTryoutSeasonResponse(
   };
 
   await saveTryoutSeasonItem(updatedSeason);
-  return serializeTryoutSeason(updatedSeason, players);
+  return serializeTryoutSeason(updatedSeason, players, allowedTryoutBirthYears);
 }
 
 async function deleteTryoutSeasonResponse(
@@ -1259,7 +1292,15 @@ async function buildTryoutSeasonReportData(
   const seasonPlayers = players.filter(
     (player) => player.organizationId === ORGANIZATION_ID,
   );
-  const serializedSeason = serializeTryoutSeason(season, seasonPlayers);
+  const allowedTryoutBirthYears = buildTryoutBirthYearOptions(
+    organization.tryoutBirthYearYoungest,
+    organization.tryoutBirthYearOldest,
+  );
+  const serializedSeason = serializeTryoutSeason(
+    season,
+    seasonPlayers,
+    allowedTryoutBirthYears,
+  );
   const teamMap = new Map(serializedSeason.teams.map((team) => [team.id, team]));
   const groupMap = new Map(serializedSeason.groups.map((group) => [group.id, group]));
   const playerMap = new Map(seasonPlayers.map((player) => [player.playerId, player]));
@@ -1382,7 +1423,8 @@ async function getEvaluationSessionContextResponse(
   sessionId: string,
 ): Promise<SerializedEvaluationSessionContext> {
   await assertCanManageTryouts(userId);
-  const [season, players, evaluatorProfile] = await Promise.all([
+  const [organization, season, players, evaluatorProfile] = await Promise.all([
+    getOrganizationOverview(),
     getTryoutSeasonItem(seasonId),
     scanAll<PlayerItem>('Player'),
     requireUserProfile(userId),
@@ -1397,7 +1439,15 @@ async function getEvaluationSessionContextResponse(
     throw badRequest('Assign an evaluation template to this session before starting evaluation.');
   }
 
-  const groups = sanitizeTryoutGroups(season.groups);
+  const allowedTryoutBirthYears = buildTryoutBirthYearOptions(
+    organization.tryoutBirthYearYoungest,
+    organization.tryoutBirthYearOldest,
+  );
+  const groups = sanitizeTryoutGroups(
+    season.groups,
+    [],
+    new Set(allowedTryoutBirthYears),
+  );
   const teams = sanitizeTryoutTeams(season.teams, groups);
   const template = await getEvaluationTemplateItem(session.evaluationTemplateId);
   if (!template) {
@@ -1407,7 +1457,11 @@ async function getEvaluationSessionContextResponse(
   const seasonPlayers = players.filter(
     (player) => player.organizationId === ORGANIZATION_ID,
   );
-  const playerSummaries = serializeTryoutSeason(season, seasonPlayers).players;
+  const playerSummaries = serializeTryoutSeason(
+    season,
+    seasonPlayers,
+    allowedTryoutBirthYears,
+  ).players;
   const playerSummaryMap = new Map(playerSummaries.map((player) => [player.playerId, player]));
   const playerMap = new Map(seasonPlayers.map((player) => [player.playerId, player]));
   const sessionTeamIds = new Set(session.teamIds);
@@ -1467,7 +1521,8 @@ async function updatePlayerEvaluationRecordResponse(
 ): Promise<{ record: SerializedPlayerEvaluationRecord | null }> {
   await assertCanManageTryouts(userId);
   const payload = parseJsonBody<EvaluationRecordUpdateInput>(body);
-  const [season, player, evaluatorProfile] = await Promise.all([
+  const [organization, season, player, evaluatorProfile] = await Promise.all([
+    getOrganizationOverview(),
     getTryoutSeasonItem(seasonId),
     getPlayer(playerId),
     requireUserProfile(userId),
@@ -1478,7 +1533,15 @@ async function updatePlayerEvaluationRecordResponse(
     throw notFound('Player not found.');
   }
 
-  const groups = sanitizeTryoutGroups(season.groups);
+  const allowedTryoutBirthYears = buildTryoutBirthYearOptions(
+    organization.tryoutBirthYearYoungest,
+    organization.tryoutBirthYearOldest,
+  );
+  const groups = sanitizeTryoutGroups(
+    season.groups,
+    [],
+    new Set(allowedTryoutBirthYears),
+  );
   const teams = sanitizeTryoutTeams(season.teams, groups);
   const session = sanitizeTryoutSessions(season.sessions, teams).find(
     (entry) => entry.id === sessionId,
@@ -2845,6 +2908,12 @@ function serializeOrganization(organization: OrganizationItem): OrganizationOver
     tryoutWindowLabel: organization.tryoutWindowLabel,
     tryoutWindowStart: organization.tryoutWindowStart,
     tryoutWindowEnd: organization.tryoutWindowEnd,
+    tryoutBirthYearYoungest:
+      organization.tryoutBirthYearYoungest ??
+      defaultOrganization.tryoutBirthYearYoungest,
+    tryoutBirthYearOldest:
+      organization.tryoutBirthYearOldest ??
+      defaultOrganization.tryoutBirthYearOldest,
     intakeIntro: organization.intakeIntro,
   };
 }
@@ -2854,6 +2923,12 @@ function sanitizeOrganizationSettings(
   existing: OrganizationItem | null,
 ): Omit<OrganizationItem, 'pk' | 'sk' | 'entityType' | 'organizationId' | 'createdAt' | 'updatedAt' | 'updatedByUserId'> {
   const base = existing ? serializeOrganization(existing) : defaultOrganization;
+  const tryoutBirthYearRange = sanitizeTryoutBirthYearRange(
+    payload.tryoutBirthYearYoungest,
+    payload.tryoutBirthYearOldest,
+    base.tryoutBirthYearYoungest,
+    base.tryoutBirthYearOldest,
+  );
 
   return {
     name: sanitizeRequiredText(payload.name, base.name, 'Organization name'),
@@ -2865,6 +2940,8 @@ function sanitizeOrganizationSettings(
     tryoutWindowLabel: sanitizeRequiredText(payload.tryoutWindowLabel, base.tryoutWindowLabel, 'Tryout window label'),
     tryoutWindowStart: sanitizeDate(payload.tryoutWindowStart, base.tryoutWindowStart, 'Tryout window start'),
     tryoutWindowEnd: sanitizeDate(payload.tryoutWindowEnd, base.tryoutWindowEnd, 'Tryout window end'),
+    tryoutBirthYearYoungest: tryoutBirthYearRange.youngest,
+    tryoutBirthYearOldest: tryoutBirthYearRange.oldest,
     intakeIntro: sanitizeRequiredText(payload.intakeIntro, base.intakeIntro, 'Intake introduction'),
   };
 }
@@ -2970,6 +3047,7 @@ function sanitizeEvaluationNotes(
 function sanitizeTryoutGroups(
   groups: unknown,
   fallback: TryoutGroup[] = [],
+  allowedBirthYears: ReadonlySet<string> | null = null,
 ): TryoutGroup[] {
   const sourceGroups =
     groups === undefined ? fallback : Array.isArray(groups) ? groups : null;
@@ -2987,7 +3065,10 @@ function sanitizeTryoutGroups(
         `Group ${index + 1}`,
         `Tryout group ${index + 1} name`,
       ),
-      allowedBirthYears: sanitizeTryoutBirthYears(record.allowedBirthYears),
+      allowedBirthYears: sanitizeTryoutBirthYears(
+        record.allowedBirthYears,
+        allowedBirthYears,
+      ),
       allowedGenders: sanitizeTryoutGenders(record.allowedGenders),
     };
 
@@ -2999,13 +3080,19 @@ function sanitizeTryoutGroups(
   });
 }
 
-function sanitizeTryoutBirthYears(value: unknown): string[] {
+function sanitizeTryoutBirthYears(
+  value: unknown,
+  allowedBirthYears: ReadonlySet<string> | null = null,
+): string[] {
   if (!Array.isArray(value)) return [];
   return [...new Set(
     value
       .map((entry) => sanitizeYearField(entry, '', 'Birth year'))
+      .filter((entry) =>
+        allowedBirthYears ? allowedBirthYears.has(entry) : true,
+      )
       .filter(Boolean),
-  )].sort();
+  )].sort((left, right) => Number(right) - Number(left));
 }
 
 function sanitizeTryoutGenders(value: unknown): TryoutGender[] {
@@ -3597,6 +3684,66 @@ function sanitizeYearField(
   return nextValue;
 }
 
+function sanitizeTryoutBirthYearRange(
+  youngestValue: unknown,
+  oldestValue: unknown,
+  fallbackYoungest: string,
+  fallbackOldest: string,
+): { youngest: string; oldest: string } {
+  const youngest = sanitizeYearField(
+    youngestValue,
+    fallbackYoungest,
+    'Youngest tryout birth year',
+  );
+  const oldest = sanitizeYearField(
+    oldestValue,
+    fallbackOldest,
+    'Oldest tryout birth year',
+  );
+
+  if (!youngest || !oldest) {
+    throw badRequest(
+      'Youngest and oldest tryout birth years must both be configured.',
+    );
+  }
+
+  if (Number(youngest) < Number(oldest)) {
+    throw badRequest(
+      'Youngest tryout birth year must be the same as or later than the oldest tryout birth year.',
+    );
+  }
+
+  return { youngest, oldest };
+}
+
+function buildTryoutBirthYearOptions(
+  youngestBirthYear: string,
+  oldestBirthYear: string,
+): string[] {
+  if (
+    !/^\d{4}$/.test(youngestBirthYear) ||
+    !/^\d{4}$/.test(oldestBirthYear)
+  ) {
+    return [];
+  }
+
+  const startYear = Math.max(
+    Number(youngestBirthYear),
+    Number(oldestBirthYear),
+  );
+  const endYear = Math.min(
+    Number(youngestBirthYear),
+    Number(oldestBirthYear),
+  );
+  const years: string[] = [];
+
+  for (let year = startYear; year >= endYear; year -= 1) {
+    years.push(String(year));
+  }
+
+  return years;
+}
+
 function sanitizeSeasonLabel(value: unknown): string {
   const nextValue = sanitizeFreeText(value);
 
@@ -3750,11 +3897,18 @@ function serializeEvaluationSessionPlayer(
 function serializeTryoutSeason(
   season: TryoutSeasonItem,
   players: PlayerItem[],
+  allowedTryoutBirthYears: string[] = [],
 ): SerializedTryoutSeason {
   const seasonPlayers = players.filter(
     (player) => player.organizationId === ORGANIZATION_ID,
   );
-  const groups = sanitizeTryoutGroups(season.groups);
+  const groups = sanitizeTryoutGroups(
+    season.groups,
+    [],
+    allowedTryoutBirthYears.length > 0
+      ? new Set(allowedTryoutBirthYears)
+      : null,
+  );
   const teams = sanitizeTryoutTeams(season.teams, groups);
   const sessions = sanitizeTryoutSessions(season.sessions, teams);
   const playerOverrides = sanitizeTryoutPlayerOverrides(

@@ -41,6 +41,8 @@ export type OrganizationOverview = {
   tryoutWindowLabel: string;
   tryoutWindowStart: string;
   tryoutWindowEnd: string;
+  tryoutBirthYearYoungest: string;
+  tryoutBirthYearOldest: string;
   intakeIntro: string;
 };
 
@@ -54,6 +56,8 @@ export type OrganizationSettingsInput = {
   tryoutWindowLabel: string;
   tryoutWindowStart: string;
   tryoutWindowEnd: string;
+  tryoutBirthYearYoungest: string;
+  tryoutBirthYearOldest: string;
   intakeIntro: string;
 };
 

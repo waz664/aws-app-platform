@@ -220,6 +220,7 @@ type TryoutSetupCardProps = {
   roleLabel: string;
   seasons: TryoutSeason[];
   draft: TryoutSeason | null;
+  birthYearOptions: string[];
   loaded: boolean;
   loading: boolean;
   evaluationTemplates: EvaluationTemplate[];
@@ -1943,10 +1944,33 @@ function App() {
       currentValue
         ? recalculateTryoutSeasonDraft(
             updater(cloneTryoutSeasonState(currentValue)),
+            tryoutBirthYearOptions,
           )
         : currentValue,
     );
   }
+
+  const tryoutBirthYearOptions = buildTryoutBirthYearOptions(
+    organizationDraft?.tryoutBirthYearYoungest ??
+      bootstrap?.organization.tryoutBirthYearYoungest ??
+      '',
+    organizationDraft?.tryoutBirthYearOldest ??
+      bootstrap?.organization.tryoutBirthYearOldest ??
+      '',
+  );
+  const tryoutBirthYearOptionsKey = tryoutBirthYearOptions.join('|');
+
+  useEffect(() => {
+    if (!tryoutBirthYearOptionsKey) return;
+    setTryoutSeasonDraft((currentValue) =>
+      currentValue
+        ? recalculateTryoutSeasonDraft(
+            cloneTryoutSeasonState(currentValue),
+            tryoutBirthYearOptionsKey.split('|'),
+          )
+        : currentValue,
+    );
+  }, [tryoutBirthYearOptionsKey]);
 
   async function handleCreateTryoutSeason(): Promise<void> {
     if (!runtimeConfig || authSession?.status !== 'authenticated') return;
@@ -2764,6 +2788,7 @@ function App() {
       roleLabel={activeWorkspaceTitle}
       seasons={tryoutSeasons}
       draft={tryoutSeasonDraft}
+      birthYearOptions={tryoutBirthYearOptions}
       loaded={tryoutSeasonsLoaded}
       loading={tryoutSeasonsLoading}
       evaluationTemplates={evaluationTemplates}
@@ -3533,7 +3558,55 @@ function App() {
                             }}
                           />
                         </label>
+
+                        <label className="field">
+                          <span>Youngest tryout birth year</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min="1900"
+                            max="2099"
+                            step="1"
+                            value={organizationDraft.tryoutBirthYearYoungest}
+                            onChange={(event) => {
+                              setOrganizationDraft((currentValue) =>
+                                currentValue
+                                  ? {
+                                      ...currentValue,
+                                      tryoutBirthYearYoungest: event.target.value,
+                                    }
+                                  : currentValue,
+                              );
+                            }}
+                          />
+                        </label>
+
+                        <label className="field">
+                          <span>Oldest tryout birth year</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min="1900"
+                            max="2099"
+                            step="1"
+                            value={organizationDraft.tryoutBirthYearOldest}
+                            onChange={(event) => {
+                              setOrganizationDraft((currentValue) =>
+                                currentValue
+                                  ? {
+                                      ...currentValue,
+                                      tryoutBirthYearOldest: event.target.value,
+                                    }
+                                  : currentValue,
+                              );
+                            }}
+                          />
+                        </label>
                       </div>
+                      <p className="helper-copy">
+                        This range powers the birth-year chips in tryout group
+                        setup, ordered youngest to oldest.
+                      </p>
                     </div>
 
                     <div className="form-section">
@@ -6632,6 +6705,7 @@ function TryoutSetupCard({
   roleLabel,
   seasons,
   draft,
+  birthYearOptions,
   loaded,
   loading,
   evaluationTemplates,
@@ -6665,11 +6739,16 @@ function TryoutSetupCard({
   onStartEvaluation,
   onStartPlayerDrag,
 }: TryoutSetupCardProps) {
-  const birthYearOptions = buildTryoutBirthYearOptions(draft?.players ?? []);
   const groups = draft?.groups ?? [];
   const teams = draft?.teams ?? [];
   const sessions = draft?.sessions ?? [];
   const teamMap = new Map(teams.map((team) => [team.id, team]));
+  const birthYearRangeLabel =
+    birthYearOptions.length > 0
+      ? `${birthYearOptions[0]} to ${
+          birthYearOptions[birthYearOptions.length - 1]
+        }`
+      : 'No birth years configured yet.';
   const unassignedPlayers = draft
     ? draft.players.filter((player) => player.effectiveGroupId === null)
     : [];
@@ -7001,6 +7080,9 @@ function TryoutSetupCard({
 
                     <div className="form-section">
                       <h3>Allowed birth years</h3>
+                      <p className="helper-copy">
+                        Club settings currently allow {birthYearRangeLabel}.
+                      </p>
                       <div className="chip-list">
                         {birthYearOptions.map((birthYear) => (
                           <label key={`${group.id}-${birthYear}`} className="chip-option">
@@ -8109,6 +8191,8 @@ function buildOrganizationSettingsDraft(
     tryoutWindowLabel: organization.tryoutWindowLabel,
     tryoutWindowStart: organization.tryoutWindowStart,
     tryoutWindowEnd: organization.tryoutWindowEnd,
+    tryoutBirthYearYoungest: organization.tryoutBirthYearYoungest,
+    tryoutBirthYearOldest: organization.tryoutBirthYearOldest,
     intakeIntro: organization.intakeIntro,
   };
 }
@@ -8165,10 +8249,21 @@ function cloneTryoutSeasonState(season: TryoutSeason): TryoutSeason {
   };
 }
 
-function recalculateTryoutSeasonDraft(season: TryoutSeason): TryoutSeason {
+function recalculateTryoutSeasonDraft(
+  season: TryoutSeason,
+  birthYearOptions: string[] = [],
+): TryoutSeason {
+  const allowedBirthYearSet =
+    birthYearOptions.length > 0 ? new Set(birthYearOptions) : null;
   const groups = season.groups.map((group) => ({
     ...group,
-    allowedBirthYears: sortTryoutBirthYears(group.allowedBirthYears),
+    allowedBirthYears: sortTryoutBirthYears(
+      allowedBirthYearSet
+        ? group.allowedBirthYears.filter((birthYear) =>
+            allowedBirthYearSet.has(birthYear),
+          )
+        : group.allowedBirthYears,
+    ),
     allowedGenders: TRYOUT_GENDERS.filter((gender) =>
       group.allowedGenders.includes(gender),
     ),
@@ -8344,23 +8439,28 @@ function isDefaultTryoutOverrideState(
 }
 
 function buildTryoutBirthYearOptions(
-  players: TryoutPlayerSummary[],
-  date = new Date(),
+  youngestBirthYear: string,
+  oldestBirthYear: string,
 ): string[] {
-  const years = new Set<string>();
-  const currentYear = date.getFullYear();
-
-  for (let year = currentYear - 7; year >= currentYear - 20; year -= 1) {
-    years.add(String(year));
+  if (!/^\d{4}$/.test(youngestBirthYear) || !/^\d{4}$/.test(oldestBirthYear)) {
+    return [];
   }
 
-  players.forEach((player) => {
-    if (/^\d{4}$/.test(player.birthYear)) {
-      years.add(player.birthYear);
-    }
-  });
+  const startYear = Math.max(
+    Number(youngestBirthYear),
+    Number(oldestBirthYear),
+  );
+  const endYear = Math.min(
+    Number(youngestBirthYear),
+    Number(oldestBirthYear),
+  );
+  const years: string[] = [];
 
-  return sortTryoutBirthYears([...years]);
+  for (let year = startYear; year >= endYear; year -= 1) {
+    years.push(String(year));
+  }
+
+  return years;
 }
 
 function sortTryoutBirthYears(values: string[]): string[] {
