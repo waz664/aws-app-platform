@@ -974,7 +974,7 @@ async function updateAdminUserResponse(
 async function listEvaluationTemplatesResponse(
   userId: string,
 ): Promise<SerializedEvaluationTemplate[]> {
-  await assertCanManageOrganization(userId);
+  await assertCanManageTryouts(userId);
   const templates = await listEvaluationTemplateItems();
   return templates.map(serializeEvaluationTemplate);
 }

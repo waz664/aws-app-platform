@@ -1033,6 +1033,12 @@ function App() {
             ? currentValue
             : templates[0]?.id ?? null,
         );
+        setFeedback((currentValue) =>
+          currentValue?.tone === 'error' &&
+          currentValue.message.toLowerCase().includes('unauthorized')
+            ? null
+            : currentValue,
+        );
       } catch (error) {
         if (cancelled) return;
         setFeedback({
@@ -1102,6 +1108,12 @@ function App() {
           currentValue && seasons.some((season) => season.id === currentValue)
             ? currentValue
             : seasons[0]?.id ?? null,
+        );
+        setFeedback((currentValue) =>
+          currentValue?.tone === 'error' &&
+          currentValue.message.toLowerCase().includes('unauthorized')
+            ? null
+            : currentValue,
         );
       } catch (error) {
         if (cancelled) return;

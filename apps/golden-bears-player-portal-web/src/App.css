@@ -2394,6 +2394,10 @@
     grid-template-columns: minmax(0, 1.2fr) minmax(13rem, 0.9fr);
   }
 
+  .workspace-grid.workspace-grid--single {
+    grid-template-columns: 1fr;
+  }
+
   .summary-strip,
   .action-dock,
   .design-session-grid,
