@@ -1284,17 +1284,6 @@ function App() {
   ): Promise<void> {
     if (!runtimeConfig || !authSession) return;
 
-    const firstName = nextDraft.firstName.trim();
-    const lastName = nextDraft.lastName.trim();
-
-    if (!firstName || !lastName) {
-      setFeedback({
-        tone: 'error',
-        message: 'First name and last name are required to save your profile.',
-      });
-      return;
-    }
-
     const execute = options?.silent ? runSilentAction : runAction;
 
     await execute('save-user-profile', async () => {
@@ -1304,8 +1293,8 @@ function App() {
         runtimeConfig,
         authSession.idToken,
         {
-          firstName,
-          lastName,
+          firstName: nextDraft.firstName.trim(),
+          lastName: nextDraft.lastName.trim(),
           contactEmail: nextDraft.contactEmail.trim(),
           phoneNumber: nextDraft.phoneNumber.trim(),
           smsOptIn: nextDraft.smsOptIn,
