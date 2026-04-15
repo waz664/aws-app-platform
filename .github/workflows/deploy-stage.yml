@@ -41,6 +41,3 @@ jobs:
       - name: Deploy stage environment
         run: npm run deploy:stage --if-present
 
-      - name: Seed synthetic players for stage
-        run: node ./scripts/seed-synthetic-players.mjs --env stage --count 80
-

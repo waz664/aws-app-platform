@@ -41,6 +41,3 @@ jobs:
       - name: Deploy dev environment
         run: npm run deploy:dev --if-present
 
-      - name: Seed synthetic players for dev
-        run: node ./scripts/seed-synthetic-players.mjs --env dev --count 80
-
